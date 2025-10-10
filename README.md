@@ -115,7 +115,10 @@ pnpm start
 To import only a specific page and its children:
 1. Get the page ID from Notion URL (e.g., `https://notion.so/My-Page-abc123def456`)
 2. Set `NOTION_ROOT_PAGE_ID=abc123def456` in `.env`
-3. Run `pnpm start`
+3. **Important**: Make sure the page is shared with your integration (see Configuration section)
+4. Run `pnpm start`
+
+The tool will validate that the specified root page exists and is accessible before starting the import. If validation fails, you'll receive clear instructions on how to fix the issue.
 
 ### Incremental/Subsequent Imports
 
@@ -178,6 +181,8 @@ notion-to-trilium/
 ├── tests/
 │   ├── cache.test.ts        # Cache module tests
 │   ├── converter.test.ts    # Converter tests
+│   ├── fetcher.test.ts      # Fetcher and validation tests
+│   ├── importer.test.ts     # Importer and validation tests
 │   └── logger.test.ts       # Logger tests
 ├── .env.example             # Example environment file
 ├── .notion-cache.db         # SQLite cache (auto-generated)
@@ -206,6 +211,26 @@ The following Notion block types are supported and converted to HTML:
 
 ## Troubleshooting
 
+### Root page not found or inaccessible
+
+**Issue**: "The specified root page does not exist or is not accessible"
+
+This error occurs when you specify a `NOTION_ROOT_PAGE_ID` that either doesn't exist or your integration can't access.
+
+**Solutions**:
+1. **Verify the page ID**: Check that the page ID in your `.env` file is correct
+   - Copy the page URL from Notion (e.g., `https://notion.so/My-Page-abc123def456`)
+   - The page ID is the last part: `abc123def456`
+2. **Grant integration access**: The page must be shared with your Notion integration
+   - Open the page in Notion
+   - Click the "..." menu in the top right
+   - Select "Add connections"
+   - Choose your integration from the list
+3. **Check the page exists**: Make sure the page hasn't been deleted or moved
+4. **Verify token permissions**: Ensure your `NOTION_TOKEN` has "Read content" capability
+
+**Note**: The tool validates the root page before starting the import to provide early feedback. This helps you fix access issues before spending time on a failed import.
+
 ### No pages found
 
 **Issue**: "No pages found to import"
@@ -224,6 +249,29 @@ The following Notion block types are supported and converted to HTML:
 - Check that `TRILIUM_URL` is correct
 - Ensure ETAPI is enabled in Trilium options
 - Verify your `TRILIUM_TOKEN` is valid
+
+### Trilium parent note not found or inaccessible
+
+**Issue**: "The specified Trilium parent note does not exist or is not accessible"
+
+This error occurs when you specify a `TRILIUM_PARENT_NOTE_ID` that either doesn't exist or is not accessible in your Trilium instance.
+
+**Option A: Create a new parent note in Trilium**
+1. Open your Trilium instance
+2. Create a new note where you want to import your Notion pages (e.g., "Imported from Notion")
+3. Right-click on the note → Select "Note info"
+4. Copy the Note ID
+5. Update `TRILIUM_PARENT_NOTE_ID` in your `.env` file with this ID
+6. Run the import again
+
+**Option B: Change to an existing parent note**
+1. Find an existing note in Trilium where you want to import pages
+2. Right-click on the note → Select "Note info"
+3. Copy the Note ID
+4. Update `TRILIUM_PARENT_NOTE_ID` in your `.env` file with this ID
+5. Alternatively, use `root` to import to the root of your note tree
+
+**Note**: The tool validates the parent note before starting the import to provide early feedback. This prevents wasting time on imports that would fail due to an invalid parent note.
 
 ### Import is slow
 

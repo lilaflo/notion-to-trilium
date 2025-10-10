@@ -234,14 +234,18 @@ async function main() {
           }
         } else {
           stats.failed++;
-          logger.error(`❌ Failed to import: ${page.title}`);
+          const parentInfo = page.parentId
+            ? ` (parent: ${page.parentId}, mapped: ${pageMapping.has(page.parentId)})`
+            : ' (no parent)';
+          logger.error(`❌ Failed to import: ${page.title}${parentInfo}`);
 
-          // Log error to database
+          // Log error to database with context
           if (cache) {
+            const errorMsg = `Failed to create note in Trilium - no noteId returned. Parent: ${page.parentId || 'none'}, Has mapping: ${page.parentId && pageMapping.has(page.parentId)}`;
             cache.logError(
               page.id,
               page.title,
-              'Failed to create note in Trilium - no noteId returned',
+              errorMsg,
               'import'
             );
           }

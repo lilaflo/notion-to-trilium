@@ -167,11 +167,13 @@ export async function createNote(
       ? pageMapping.get(page.parentId)!
       : parentNoteId;
 
+    logger.debug(`Creating note "${page.title}" under parent ${triliumParentId}`);
+
     // Convert Notion content to HTML
     const htmlContent = convertPageToHtml(page);
 
     // Create the note
-    const response = await etapiRequest<ETAPINote>('/create-note', {
+    const response = await etapiRequest<any>('/create-note', {
       method: 'POST',
       body: {
         parentNoteId: triliumParentId,
@@ -182,12 +184,23 @@ export async function createNote(
       },
     });
 
-    // Add metadata as attributes
-    if (response.noteId) {
-      await addNoteAttributes(response.noteId, page);
+    logger.debug(`Create note response for "${page.title}": ${JSON.stringify(response)}`);
+
+    // Try different possible response formats (same as createParentNote)
+    const noteId = response.noteId || response.note?.noteId || response.id;
+
+    if (!noteId) {
+      logger.error(`No noteId in response for "${page.title}"`);
+      logger.error(`Response structure: ${JSON.stringify(response, null, 2)}`);
+      logger.error(`Parent ID used: ${triliumParentId}`);
+      logger.error(`Notion parent ID: ${page.parentId || 'none'}`);
+      return null;
     }
 
-    return response.noteId;
+    // Add metadata as attributes
+    await addNoteAttributes(noteId, page);
+
+    return noteId;
   } catch (error) {
     logger.error(`Failed to create note for page ${page.id}`, error);
     return null;

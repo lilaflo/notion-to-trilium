@@ -41,21 +41,29 @@ export async function validateRootPage(
 }
 
 /**
+ * Callback function that processes each page as it's fetched
+ */
+export type PageCallback = (page: NotionPage) => Promise<void>;
+
+/**
  * Fetches all accessible pages from Notion workspace
+ * If onPageFetched callback is provided, pages are processed immediately
+ * Otherwise, all pages are collected and returned
  */
 export async function fetchAllPages(
   client: Client,
-  rootPageId?: string
+  rootPageId?: string,
+  onPageFetched?: PageCallback
 ): Promise<NotionPage[]> {
   const pages: NotionPage[] = [];
   const processedIds = new Set<string>();
 
   if (rootPageId) {
     logger.info(`Fetching from root page: ${rootPageId}`);
-    await fetchPageRecursive(client, rootPageId, pages, processedIds);
+    await fetchPageRecursive(client, rootPageId, pages, processedIds, onPageFetched);
   } else {
     logger.info('Fetching all accessible pages from workspace');
-    await fetchAllAccessiblePages(client, pages, processedIds);
+    await fetchAllAccessiblePages(client, pages, processedIds, onPageFetched);
   }
 
   logger.success(`Fetched ${pages.length} pages from Notion`);
@@ -68,7 +76,8 @@ export async function fetchAllPages(
 async function fetchAllAccessiblePages(
   client: Client,
   pages: NotionPage[],
-  processedIds: Set<string>
+  processedIds: Set<string>,
+  onPageFetched?: PageCallback
 ): Promise<void> {
   let hasMore = true;
   let startCursor: string | undefined;
@@ -89,6 +98,11 @@ async function fetchAllAccessiblePages(
           pages.push(page);
           processedIds.add(result.id);
           logger.progress(pages.length, pages.length, `Fetched: ${page.title}`);
+
+          // Process page immediately if callback provided
+          if (onPageFetched) {
+            await onPageFetched(page);
+          }
         }
       }
     }
@@ -105,7 +119,8 @@ async function fetchPageRecursive(
   client: Client,
   pageId: string,
   pages: NotionPage[],
-  processedIds: Set<string>
+  processedIds: Set<string>,
+  onPageFetched?: PageCallback
 ): Promise<void> {
   if (processedIds.has(pageId)) {
     return;
@@ -120,10 +135,15 @@ async function fetchPageRecursive(
   processedIds.add(pageId);
   logger.progress(pages.length, pages.length, `Fetched: ${page.title}`);
 
+  // Process page immediately if callback provided
+  if (onPageFetched) {
+    await onPageFetched(page);
+  }
+
   // Find child pages in the content blocks
   const childPageIds = findChildPageIds(page.content);
   for (const childId of childPageIds) {
-    await fetchPageRecursive(client, childId, pages, processedIds);
+    await fetchPageRecursive(client, childId, pages, processedIds, onPageFetched);
   }
 }
 

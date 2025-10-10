@@ -9,6 +9,38 @@ import { logger } from '../utils/logger.js';
 import type { NotionPage, NotionBlock } from './types.js';
 
 /**
+ * Validates that a Notion page exists and is accessible
+ * @returns true if page exists and is accessible, false otherwise
+ */
+export async function validateRootPage(
+  client: Client,
+  pageId: string
+): Promise<boolean> {
+  try {
+    logger.debug(`Validating root page: ${pageId}`);
+    const page = await client.pages.retrieve({ page_id: pageId });
+
+    if (!isFullPage(page)) {
+      logger.error(`Page ${pageId} exists but is not accessible to your integration`);
+      return false;
+    }
+
+    const title = extractPageTitle(page);
+    logger.success(`Root page validated: "${title}" (${pageId})`);
+    return true;
+  } catch (error: any) {
+    if (error?.code === 'object_not_found') {
+      logger.error(`Page ${pageId} does not exist`);
+    } else if (error?.code === 'unauthorized') {
+      logger.error(`Page ${pageId} exists but your integration does not have access to it`);
+    } else {
+      logger.error(`Failed to validate page ${pageId}`, error);
+    }
+    return false;
+  }
+}
+
+/**
  * Fetches all accessible pages from Notion workspace
  */
 export async function fetchAllPages(

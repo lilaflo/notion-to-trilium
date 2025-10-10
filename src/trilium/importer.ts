@@ -213,6 +213,42 @@ export async function testConnection(): Promise<boolean> {
 }
 
 /**
+ * Validates that a Trilium parent note exists and is accessible
+ * @returns true if note exists and is accessible, false otherwise
+ */
+export async function validateParentNote(noteId: string): Promise<boolean> {
+  try {
+    logger.debug(`Validating parent note: ${noteId}`);
+
+    // Special case: 'root' is always valid
+    if (noteId === 'root') {
+      logger.success('Parent note validated: root');
+      return true;
+    }
+
+    // Try to fetch the note
+    const response = await etapiRequest<ETAPINote>(`/notes/${noteId}`);
+
+    if (response.noteId) {
+      logger.success(`Parent note validated: "${response.title}" (${noteId})`);
+      return true;
+    }
+
+    logger.error(`Parent note ${noteId} exists but could not be retrieved`);
+    return false;
+  } catch (error: any) {
+    if (error?.message?.includes('404')) {
+      logger.error(`Parent note ${noteId} does not exist`);
+    } else if (error?.message?.includes('401') || error?.message?.includes('403')) {
+      logger.error(`Parent note ${noteId} exists but you do not have access to it`);
+    } else {
+      logger.error(`Failed to validate parent note ${noteId}`, error);
+    }
+    return false;
+  }
+}
+
+/**
  * Searches for existing notes by Notion ID to avoid duplicates
  */
 export async function findExistingNotionNote(notionId: string): Promise<string | null> {

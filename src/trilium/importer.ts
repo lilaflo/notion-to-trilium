@@ -1,8 +1,9 @@
 import type { NotionPage, NotionPageMetadata } from '../notion/types.js';
 import { convertPageToHtml } from '../notion/converter.js';
-import { etapiRequest, type ETAPINote } from './etapi.js';
+import { etapiRequest, type ETAPINote, getETAPIBaseUrl, getETAPIAuthHeader } from './etapi.js';
 import { logger } from '../utils/logger.js';
 import type { NotionCache } from '../cache/index.js';
+import fetch from 'node-fetch';
 
 /**
  * Import statistics
@@ -222,14 +223,25 @@ async function updateNoteInTrilium(
   pageMeta: NotionPageMetadata
 ): Promise<void> {
   try {
-    // Update note content
-    await etapiRequest(`/notes/${noteId}/content`, {
+    // Ensure content is not null or undefined
+    const content = htmlContent || '<p></p>'; // Provide default empty paragraph if content is empty
+
+    logger.debug(`Updating note ${noteId} with content length: ${content.length}`);
+
+    // Update note content - ETAPI expects raw HTML string in body
+    const response = await fetch(`${getETAPIBaseUrl()}/etapi/notes/${noteId}/content`, {
       method: 'PUT',
       headers: {
+        'Authorization': getETAPIAuthHeader(),
         'Content-Type': 'text/html',
       },
-      body: htmlContent,
+      body: content, // Send raw HTML, not JSON
     });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to update content: ${response.status} ${response.statusText}. ${errorText}`);
+    }
 
     // Add metadata attributes
     await addNoteAttributes(noteId, {

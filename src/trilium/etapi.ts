@@ -27,6 +27,27 @@ export function initETAPI(baseUrl: string, token: string): void {
 }
 
 /**
+ * Gets the ETAPI base URL
+ */
+export function getETAPIBaseUrl(): string {
+  if (!config) {
+    throw new Error('ETAPI not initialized. Call initETAPI first.');
+  }
+  return config.baseUrl;
+}
+
+/**
+ * Gets the ETAPI authorization header value
+ */
+export function getETAPIAuthHeader(): string {
+  if (!config) {
+    throw new Error('ETAPI not initialized. Call initETAPI first.');
+  }
+  const authString = Buffer.from(`etapi:${config.token}`).toString('base64');
+  return `Basic ${authString}`;
+}
+
+/**
  * Makes an authenticated request to Trilium ETAPI
  */
 export async function etapiRequest<T = any>(

@@ -19,6 +19,103 @@ function createReadlineInterface() {
 }
 
 /**
+ * Generates an ASCII tree visualization of the page hierarchy
+ */
+function generateTreeVisualization(
+  pagesMetadata: import('./notion/types.js').NotionPageMetadata[],
+  maxDepth: number = 5
+): string {
+  // Build a map for quick lookups
+  const pageMap = new Map(pagesMetadata.map(p => [p.id, p]));
+
+  // Find root pages (pages without parents or parents not in our set)
+  const rootPages = pagesMetadata.filter(p => !p.parentId || !pageMap.has(p.parentId));
+
+  // Build children map
+  const childrenMap = new Map<string, import('./notion/types.js').NotionPageMetadata[]>();
+  for (const page of pagesMetadata) {
+    if (page.parentId) {
+      if (!childrenMap.has(page.parentId)) {
+        childrenMap.set(page.parentId, []);
+      }
+      childrenMap.get(page.parentId)!.push(page);
+    }
+  }
+
+  let output = '';
+  let totalShown = 0;
+  const maxNodesToShow = 100;
+
+  function addNode(page: import('./notion/types.js').NotionPageMetadata, prefix: string, isLast: boolean, depth: number) {
+    if (totalShown >= maxNodesToShow) {
+      if (totalShown === maxNodesToShow) {
+        output += `${prefix}... (${pagesMetadata.length - totalShown} more pages)\n`;
+        totalShown++;
+      }
+      return;
+    }
+
+    const connector = isLast ? '└── ' : '├── ';
+    const icon = page.icon || '📄';
+    const title = page.title.length > 60 ? page.title.substring(0, 57) + '...' : page.title;
+
+    output += `${prefix}${connector}${icon} ${title}\n`;
+    totalShown++;
+
+    if (depth >= maxDepth) {
+      const children = childrenMap.get(page.id);
+      if (children && children.length > 0) {
+        const newPrefix = prefix + (isLast ? '    ' : '│   ');
+        output += `${newPrefix}... (${children.length} child pages)\n`;
+      }
+      return;
+    }
+
+    const children = childrenMap.get(page.id) || [];
+    children.forEach((child, index) => {
+      const newPrefix = prefix + (isLast ? '    ' : '│   ');
+      addNode(child, newPrefix, index === children.length - 1, depth + 1);
+    });
+  }
+
+  rootPages.forEach((page, index) => {
+    addNode(page, '', index === rootPages.length - 1, 0);
+  });
+
+  return output;
+}
+
+/**
+ * Shows the tree preview and asks user for confirmation
+ */
+async function confirmImport(
+  pagesMetadata: import('./notion/types.js').NotionPageMetadata[]
+): Promise<boolean> {
+  console.log('');
+  console.log('═══════════════════════════════════════════════════');
+  console.log('           📋 IMPORT STRUCTURE PREVIEW            ');
+  console.log('═══════════════════════════════════════════════════');
+  console.log('');
+  console.log(`Found ${pagesMetadata.length} pages to import:`);
+  console.log('');
+  console.log(generateTreeVisualization(pagesMetadata));
+  console.log('═══════════════════════════════════════════════════');
+  console.log('');
+
+  const rl = createReadlineInterface();
+
+  try {
+    const answer = await rl.question('Do you want to proceed with this import? (yes/no): ');
+    rl.close();
+
+    const response = answer.trim().toLowerCase();
+    return response === 'yes' || response === 'y';
+  } finally {
+    rl.close();
+  }
+}
+
+/**
  * Prompts user for a new parent note ID or creates one
  */
 async function promptForParentNoteId(rl: readline.Interface): Promise<string | null> {
@@ -262,6 +359,23 @@ async function main() {
       cache.close();
       logger.success('All pages are up to date - no import needed!');
       process.exit(0);
+    }
+
+    // Show tree preview and get confirmation (unless in DRY_RUN mode)
+    if (!config.DRY_RUN) {
+      const confirmed = await confirmImport(pagesToImport);
+
+      if (!confirmed) {
+        cache.close();
+        console.log('');
+        console.log('❌ Import cancelled by user.');
+        console.log('');
+        process.exit(0);
+      }
+
+      console.log('');
+      console.log('✅ Import confirmed - proceeding...');
+      console.log('');
     }
 
     // ===== PHASE 2: Create hierarchy in Trilium =====

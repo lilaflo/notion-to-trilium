@@ -1,4 +1,4 @@
-import type { NotionPage } from '../notion/types.js';
+import type { NotionPage, NotionPageMetadata } from '../notion/types.js';
 import { convertPageToHtml } from '../notion/converter.js';
 import { etapiRequest, type ETAPINote } from './etapi.js';
 import { logger } from '../utils/logger.js';
@@ -18,6 +18,234 @@ export interface ImportStats {
  * Mapping of Notion page IDs to Trilium note IDs
  */
 type PageMapping = Map<string, string>;
+
+/**
+ * PHASE 2: Rebuilds the Notion hierarchy in Trilium (creates empty notes with structure)
+ * This ensures all parent notes exist before children are created
+ *
+ * @param pagesMetadata - Array of page metadata from Phase 1
+ * @param rootParentNoteId - The Trilium note ID to use as the root parent
+ * @param dryRun - If true, only logs what would be created
+ * @returns Mapping of Notion page IDs to Trilium note IDs
+ */
+export async function rebuildHierarchyInTrilium(
+  pagesMetadata: NotionPageMetadata[],
+  rootParentNoteId: string = 'root',
+  dryRun: boolean = false
+): Promise<PageMapping> {
+  const pageMapping: PageMapping = new Map();
+
+  if (dryRun) {
+    logger.info('🔍 [DRY RUN] Phase 2: Would create hierarchy in Trilium');
+    return pageMapping;
+  }
+
+  logger.info('📋 Phase 2: Creating note hierarchy in Trilium...');
+
+  // Sort pages by hierarchy (parents first)
+  const sortedPages = sortPagesByHierarchy(pagesMetadata);
+
+  // Create each note (just shell with title, no content yet)
+  for (let i = 0; i < sortedPages.length; i++) {
+    const pageMeta = sortedPages[i];
+    logger.progress(i + 1, sortedPages.length, `Creating: ${pageMeta.title}`);
+
+    try {
+      // Determine parent note ID in Trilium
+      const triliumParentId = pageMeta.parentId && pageMapping.has(pageMeta.parentId)
+        ? pageMapping.get(pageMeta.parentId)!
+        : rootParentNoteId;
+
+      // Create empty note with just title
+      const noteId = await createEmptyNote(pageMeta.title, triliumParentId);
+
+      if (noteId) {
+        pageMapping.set(pageMeta.id, noteId);
+        logger.debug(`Created note: ${pageMeta.title} (${noteId}) under parent ${triliumParentId}`);
+      } else {
+        logger.error(`Failed to create note: ${pageMeta.title}`);
+      }
+    } catch (error) {
+      logger.error(`Error creating note "${pageMeta.title}"`, error);
+    }
+  }
+
+  logger.success(`✅ Phase 2 complete: Created ${pageMapping.size} notes in Trilium`);
+  return pageMapping;
+}
+
+/**
+ * Sorts pages by hierarchy (parents before children)
+ * Uses topological sort to ensure proper ordering
+ */
+function sortPagesByHierarchy(pages: NotionPageMetadata[]): NotionPageMetadata[] {
+  const pageMap = new Map<string, NotionPageMetadata>();
+  const sorted: NotionPageMetadata[] = [];
+  const visited = new Set<string>();
+
+  // Build map for quick lookup
+  for (const page of pages) {
+    pageMap.set(page.id, page);
+  }
+
+  // Recursive function to add page and its ancestors first
+  function addPageWithAncestors(page: NotionPageMetadata) {
+    if (visited.has(page.id)) {
+      return;
+    }
+
+    // If page has a parent in our set, add parent first
+    if (page.parentId && pageMap.has(page.parentId)) {
+      const parent = pageMap.get(page.parentId)!;
+      addPageWithAncestors(parent);
+    }
+
+    // Now add this page
+    visited.add(page.id);
+    sorted.push(page);
+  }
+
+  // Process all pages
+  for (const page of pages) {
+    addPageWithAncestors(page);
+  }
+
+  return sorted;
+}
+
+/**
+ * Creates an empty note in Trilium (just title, no content)
+ * This is faster than creating notes with content
+ */
+async function createEmptyNote(
+  title: string,
+  parentNoteId: string
+): Promise<string | null> {
+  try {
+    const response = await etapiRequest<any>('/create-note', {
+      method: 'POST',
+      body: {
+        parentNoteId,
+        title: title || 'Untitled',
+        type: 'text',
+        content: '', // Empty content for now
+        mime: 'text/html',
+      },
+    });
+
+    // Try different possible response formats
+    const noteId = response.noteId || response.note?.noteId || response.id;
+
+    if (!noteId) {
+      logger.error(`No noteId in response for "${title}"`);
+      logger.debug(`Response structure: ${JSON.stringify(response, null, 2)}`);
+      return null;
+    }
+
+    return noteId;
+  } catch (error) {
+    logger.error(`Failed to create empty note for "${title}"`, error);
+    return null;
+  }
+}
+
+/**
+ * PHASE 3: Updates note content in Trilium
+ * At this point, all notes exist with correct hierarchy, so internal links will work
+ *
+ * @param client - Notion API client
+ * @param pagesMetadata - Array of page metadata
+ * @param pageMapping - Mapping of Notion IDs to Trilium IDs from Phase 2
+ * @param dryRun - If true, only logs what would be updated
+ * @returns Statistics about the update process
+ */
+export async function updateNoteContent(
+  pagesMetadata: NotionPageMetadata[],
+  pageMapping: PageMapping,
+  fetchContentFn: (pageId: string) => Promise<any[]>, // Function to fetch content
+  dryRun: boolean = false
+): Promise<{ successful: number; failed: number }> {
+  const stats = { successful: 0, failed: 0 };
+
+  if (dryRun) {
+    logger.info('🔍 [DRY RUN] Phase 3: Would update note content');
+    return stats;
+  }
+
+  logger.info('📝 Phase 3: Updating note content...');
+
+  for (let i = 0; i < pagesMetadata.length; i++) {
+    const pageMeta = pagesMetadata[i];
+    logger.progress(i + 1, pagesMetadata.length, `Updating: ${pageMeta.title}`);
+
+    try {
+      const triliumNoteId = pageMapping.get(pageMeta.id);
+      if (!triliumNoteId) {
+        logger.warn(`No Trilium note ID found for ${pageMeta.title}, skipping`);
+        stats.failed++;
+        continue;
+      }
+
+      // Fetch content from Notion
+      const content = await fetchContentFn(pageMeta.id);
+
+      // Build NotionPage object for conversion
+      const page: NotionPage = {
+        ...pageMeta,
+        content,
+      };
+
+      // Convert to HTML with link resolution
+      const htmlContent = convertPageToHtml(page, pageMapping);
+
+      // Update the note in Trilium
+      await updateNoteInTrilium(triliumNoteId, htmlContent, pageMeta);
+
+      stats.successful++;
+      logger.debug(`Updated content for: ${pageMeta.title}`);
+    } catch (error) {
+      stats.failed++;
+      logger.error(`Error updating content for "${pageMeta.title}"`, error);
+    }
+  }
+
+  logger.success(`✅ Phase 3 complete: Updated ${stats.successful} notes, ${stats.failed} failed`);
+  return stats;
+}
+
+/**
+ * Updates an existing note's content in Trilium
+ */
+async function updateNoteInTrilium(
+  noteId: string,
+  htmlContent: string,
+  pageMeta: NotionPageMetadata
+): Promise<void> {
+  try {
+    // Update note content
+    await etapiRequest(`/notes/${noteId}/content`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'text/html',
+      },
+      body: htmlContent,
+    });
+
+    // Add metadata attributes
+    await addNoteAttributes(noteId, {
+      id: pageMeta.id,
+      url: pageMeta.url,
+      icon: pageMeta.icon,
+      title: pageMeta.title,
+      content: [], // Not needed for attributes
+      parentId: pageMeta.parentId,
+      createdTime: pageMeta.createdTime,
+      lastEditedTime: pageMeta.lastEditedTime,
+    });
+  } catch (error) {
+    throw new Error(`Failed to update note ${noteId}: ${error}`);
+  }
+}
 
 /**
  * Sorts pages in parent-first order to ensure parents are created before children

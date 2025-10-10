@@ -6,7 +6,7 @@ import type {
   PartialBlockObjectResponse,
 } from '@notionhq/client/build/src/api-endpoints';
 import { logger } from '../utils/logger.js';
-import type { NotionPage, NotionBlock } from './types.js';
+import type { NotionPage, NotionBlock, NotionPageMetadata } from './types.js';
 
 /**
  * Validates that a Notion page exists and is accessible
@@ -44,6 +44,161 @@ export async function validateRootPage(
  * Callback function that processes each page as it's fetched
  */
 export type PageCallback = (page: NotionPage) => Promise<void>;
+
+/**
+ * PHASE 1: Scans Notion workspace structure (metadata only, no content)
+ * This is much faster than fetching full pages and provides the complete hierarchy
+ *
+ * @param client - Notion API client
+ * @param rootPageId - Optional root page ID to scan from
+ * @returns Array of page metadata with hierarchy information
+ */
+export async function scanNotionStructure(
+  client: Client,
+  rootPageId?: string
+): Promise<NotionPageMetadata[]> {
+  const metadata: NotionPageMetadata[] = [];
+  const processedIds = new Set<string>();
+
+  if (rootPageId) {
+    logger.info(`Scanning structure from root page: ${rootPageId}`);
+    await scanPageRecursive(client, rootPageId, metadata, processedIds);
+  } else {
+    logger.info('Scanning all accessible pages from workspace');
+    await scanAllAccessiblePages(client, metadata, processedIds);
+  }
+
+  logger.success(`Scanned ${metadata.length} pages from Notion`);
+  return metadata;
+}
+
+/**
+ * Scans all accessible pages for metadata only
+ */
+async function scanAllAccessiblePages(
+  client: Client,
+  metadata: NotionPageMetadata[],
+  processedIds: Set<string>
+): Promise<void> {
+  let hasMore = true;
+  let startCursor: string | undefined;
+
+  while (hasMore) {
+    const response = await client.search({
+      filter: { property: 'object', value: 'page' },
+      start_cursor: startCursor,
+      page_size: 100,
+    });
+
+    for (const result of response.results) {
+      if ('object' in result && result.object === 'page' && isFullPage(result) && !processedIds.has(result.id)) {
+        const pageMeta = extractPageMetadata(result);
+        metadata.push(pageMeta);
+        processedIds.add(result.id);
+        logger.progress(metadata.length, metadata.length, `Scanned: ${pageMeta.title}`);
+      }
+    }
+
+    hasMore = response.has_more;
+    startCursor = response.next_cursor || undefined;
+  }
+}
+
+/**
+ * Recursively scans a page and its children for metadata only
+ */
+async function scanPageRecursive(
+  client: Client,
+  pageId: string,
+  metadata: NotionPageMetadata[],
+  processedIds: Set<string>
+): Promise<void> {
+  if (processedIds.has(pageId)) {
+    return;
+  }
+
+  try {
+    const page = await client.pages.retrieve({ page_id: pageId });
+
+    if (!isFullPage(page)) {
+      logger.warn(`Page ${pageId} is not accessible`);
+      return;
+    }
+
+    const pageMeta = extractPageMetadata(page);
+    metadata.push(pageMeta);
+    processedIds.add(pageId);
+    logger.progress(metadata.length, metadata.length, `Scanned: ${pageMeta.title}`);
+
+    // Find child pages by fetching blocks (lightweight - just IDs)
+    const childPageIds = await findChildPageIdsLight(client, pageId);
+    for (const childId of childPageIds) {
+      await scanPageRecursive(client, childId, metadata, processedIds);
+    }
+  } catch (error) {
+    logger.error(`Failed to scan page ${pageId}`, error);
+  }
+}
+
+/**
+ * Finds child page IDs without fetching full content
+ */
+async function findChildPageIdsLight(
+  client: Client,
+  blockId: string
+): Promise<string[]> {
+  const childIds: string[] = [];
+  let hasMore = true;
+  let startCursor: string | undefined;
+
+  try {
+    while (hasMore) {
+      const response = await client.blocks.children.list({
+        block_id: blockId,
+        start_cursor: startCursor,
+        page_size: 100,
+      });
+
+      for (const block of response.results) {
+        if (isFullBlock(block)) {
+          // Check if it's a child_page block
+          if (block.type === 'child_page') {
+            childIds.push(block.id);
+          }
+
+          // Recursively check children if they exist
+          if (block.has_children) {
+            const nestedChildren = await findChildPageIdsLight(client, block.id);
+            childIds.push(...nestedChildren);
+          }
+        }
+      }
+
+      hasMore = response.has_more;
+      startCursor = response.next_cursor || undefined;
+    }
+  } catch (error) {
+    logger.debug(`Error finding child pages in ${blockId}`, error);
+  }
+
+  return childIds;
+}
+
+/**
+ * Extracts metadata from a Notion page (without fetching content)
+ */
+function extractPageMetadata(page: PageObjectResponse): NotionPageMetadata {
+  return {
+    id: page.id,
+    title: extractPageTitle(page),
+    parentId: extractParentId(page),
+    url: page.url,
+    createdTime: page.created_time,
+    lastEditedTime: page.last_edited_time,
+    icon: extractIcon(page),
+    cover: extractCover(page),
+  };
+}
 
 /**
  * Fetches all accessible pages from Notion workspace
@@ -179,6 +334,26 @@ export async function fetchPage(
   } catch (error) {
     logger.error(`Failed to fetch page ${pageId}`, error);
     return null;
+  }
+}
+
+/**
+ * PHASE 3: Fetches content for a page (when metadata is already known)
+ * This is used after the hierarchy has been created in Trilium
+ *
+ * @param client - Notion API client
+ * @param pageId - The page ID to fetch content for
+ * @returns Array of content blocks
+ */
+export async function fetchPageContent(
+  client: Client,
+  pageId: string
+): Promise<NotionBlock[]> {
+  try {
+    return await fetchBlocks(client, pageId);
+  } catch (error) {
+    logger.error(`Failed to fetch content for page ${pageId}`, error);
+    return [];
   }
 }
 

@@ -14,6 +14,21 @@ export interface NotionPage {
 }
 
 /**
+ * Represents Notion page metadata without content
+ * Used in Phase 1 (scan) to quickly map the structure
+ */
+export interface NotionPageMetadata {
+  id: string;
+  title: string;
+  parentId: string | null;
+  url: string;
+  createdTime: string;
+  lastEditedTime: string;
+  icon?: string;
+  cover?: string;
+}
+
+/**
  * Simplified representation of Notion blocks
  */
 export interface NotionBlock {

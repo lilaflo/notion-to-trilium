@@ -5,9 +5,9 @@ import { stdin as input, stdout as output } from 'process';
 import { getConfig } from './config/env.js';
 import { logger } from './utils/logger.js';
 import { createNotionClient } from './notion/client.js';
-import { fetchAllPages, validateRootPage } from './notion/fetcher.js';
+import { scanNotionStructure, fetchPageContent, validateRootPage } from './notion/fetcher.js';
 import { initETAPI } from './trilium/etapi.js';
-import { createNote, testConnection, validateParentNote, createParentNote } from './trilium/importer.js';
+import { rebuildHierarchyInTrilium, updateNoteContent, testConnection, validateParentNote, createParentNote } from './trilium/importer.js';
 import { NotionCache } from './cache/index.js';
 import type { NotionPage } from './notion/types.js';
 
@@ -175,8 +175,11 @@ async function main() {
       }
     }
 
-    // Fetch pages from Notion and import immediately
-    logger.info('Fetching and importing pages...');
+    // THREE-PHASE IMPORT APPROACH
+    // Phase 1: Scan structure
+    // Phase 2: Create hierarchy
+    // Phase 3: Fill in content
+    logger.info('Starting three-phase import process...');
     const startTime = Date.now();
 
     // Track import statistics
@@ -187,94 +190,102 @@ async function main() {
       total: 0,
     };
 
-    // Mapping of Notion page IDs to Trilium note IDs for hierarchy
-    const pageMapping = new Map<string, string>();
+    // ===== PHASE 1: Scan Notion structure (metadata only) =====
+    logger.info('');
+    logger.info('📊 Phase 1: Scanning Notion structure...');
+    const pagesMetadata = await scanNotionStructure(
+      notionClient,
+      config.NOTION_ROOT_PAGE_ID
+    );
 
-    // Callback to import each page immediately after fetching
-    const importPageCallback = async (page: NotionPage) => {
-      stats.total++;
+    if (pagesMetadata.length === 0) {
+      cache.close();
+      logger.warn('No pages found to import. Make sure your integration has access to pages.');
+      process.exit(0);
+    }
 
-      try {
-        // Update cache with fetched page
-        if (cache) {
-          cache.setPage(page.id, page.title, page.lastEditedTime);
-        }
+    stats.total = pagesMetadata.length;
 
-        // Check if page needs to be imported using cache
-        if (cache && !cache.needsImport(page.id, page.lastEditedTime)) {
-          logger.debug(`Skipping unchanged page: ${page.title}`);
-          stats.skipped++;
+    // Update cache with all fetched pages
+    if (cache) {
+      for (const pageMeta of pagesMetadata) {
+        cache.setPage(pageMeta.id, pageMeta.title, pageMeta.lastEditedTime);
+      }
+    }
 
-          // Still add to mapping for hierarchy purposes
-          const cached = cache.getPage(page.id);
-          if (cached?.triliumNoteId) {
-            pageMapping.set(page.id, cached.triliumNoteId);
-          }
-          return;
-        }
+    // Filter pages that need to be imported (new or modified)
+    const pagesToImport = pagesMetadata.filter(pageMeta => {
+      if (!cache) return true;
 
-        if (config.DRY_RUN) {
-          logger.info(`[DRY RUN] Would import: "${page.title}"`);
-          stats.successful++;
-          return;
-        }
+      if (!cache.needsImport(pageMeta.id, pageMeta.lastEditedTime)) {
+        stats.skipped++;
+        return false;
+      }
 
-        // Import page to Trilium immediately
-        const noteId = await createNote(page, parentNoteId, pageMapping);
+      return true;
+    });
 
-        if (noteId) {
-          pageMapping.set(page.id, noteId);
-          stats.successful++;
-          logger.info(`✅ Imported: ${page.title}`);
+    logger.info(`Found ${pagesToImport.length} pages to import (${stats.skipped} unchanged, ${stats.total - pagesToImport.length - stats.skipped} cached)`);
 
-          // Mark as imported in cache and resolve any previous errors
-          if (cache) {
-            cache.markImported(page.id, noteId);
-            cache.resolveErrors(page.id);
-          }
-        } else {
-          stats.failed++;
-          const parentInfo = page.parentId
-            ? ` (parent: ${page.parentId}, mapped: ${pageMapping.has(page.parentId)})`
-            : ' (no parent)';
-          logger.error(`❌ Failed to import: ${page.title}${parentInfo}`);
+    if (pagesToImport.length === 0) {
+      cache.close();
+      logger.success('All pages are up to date - no import needed!');
+      process.exit(0);
+    }
 
-          // Log error to database with context
-          if (cache) {
-            const errorMsg = `Failed to create note in Trilium - no noteId returned. Parent: ${page.parentId || 'none'}, Has mapping: ${page.parentId && pageMapping.has(page.parentId)}`;
-            cache.logError(
-              page.id,
-              page.title,
-              errorMsg,
-              'import'
-            );
-          }
-        }
-      } catch (error) {
-        stats.failed++;
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        const errorStack = error instanceof Error ? error.stack : undefined;
-        logger.error(`❌ Error importing page "${page.title}"`, error);
+    // ===== PHASE 2: Create hierarchy in Trilium =====
+    logger.info('');
+    logger.info('🏗️  Phase 2: Creating note hierarchy in Trilium...');
+    const pageMapping = await rebuildHierarchyInTrilium(
+      pagesToImport,
+      parentNoteId,
+      config.DRY_RUN
+    );
 
-        // Log error to database
-        if (cache) {
+    if (config.DRY_RUN) {
+      cache.close();
+      console.log('');
+      console.log('💡 This was a dry run. Set DRY_RUN=false to import for real.');
+      console.log('');
+      process.exit(0);
+    }
+
+    // ===== PHASE 3: Update note content =====
+    logger.info('');
+    logger.info('📝 Phase 3: Updating note content...');
+
+    // Create a wrapper function for fetching content
+    const fetchContent = async (pageId: string) => {
+      return await fetchPageContent(notionClient, pageId);
+    };
+
+    const contentStats = await updateNoteContent(
+      pagesToImport,
+      pageMapping,
+      fetchContent,
+      config.DRY_RUN
+    );
+
+    stats.successful = contentStats.successful;
+    stats.failed = contentStats.failed;
+
+    // Update cache for successful imports
+    if (cache) {
+      for (const pageMeta of pagesToImport) {
+        const noteId = pageMapping.get(pageMeta.id);
+        if (noteId && contentStats.successful > 0) {
+          cache.markImported(pageMeta.id, noteId);
+          cache.resolveErrors(pageMeta.id);
+        } else if (!noteId) {
           cache.logError(
-            page.id,
-            page.title,
-            errorMessage,
-            'import',
-            errorStack
+            pageMeta.id,
+            pageMeta.title,
+            'Failed to create note in Trilium during hierarchy phase',
+            'import'
           );
         }
       }
-    };
-
-    // Fetch all pages with streaming import
-    await fetchAllPages(
-      notionClient,
-      config.NOTION_ROOT_PAGE_ID,
-      importPageCallback
-    );
+    }
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
 

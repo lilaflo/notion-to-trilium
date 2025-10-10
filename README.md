@@ -122,14 +122,34 @@ To import only a specific page and its children:
 
 The tool will validate that the specified root page exists and is accessible before starting the import. If validation fails, you'll receive clear instructions on how to fix the issue.
 
-### Streaming Import Behavior
+### Three-Phase Import Architecture
 
-The tool uses a **streaming architecture** that imports pages to Trilium immediately as they're fetched from Notion, rather than waiting to fetch all pages first. This provides several benefits:
+The tool uses a **three-phase import architecture** that ensures perfect hierarchy preservation and working internal links:
 
-- **Immediate feedback** - See pages being imported in real-time
-- **Memory efficiency** - Only one page is processed at a time
-- **Resilience** - If the import is interrupted, all successfully imported pages are already stored in Trilium
-- **Better progress tracking** - You can see exactly which page is being processed at any moment
+**Phase 1: Scan Structure** 📊
+- Quickly scans all Notion pages to get metadata (ID, title, parent relationships)
+- Much faster than fetching full content
+- Builds complete picture of your Notion workspace structure
+- No content is fetched yet
+
+**Phase 2: Rebuild Hierarchy** 🏗️
+- Creates empty notes in Trilium with correct parent-child relationships
+- Uses topological sort to ensure parents are created before children
+- Builds mapping of Notion page IDs to Trilium note IDs
+- All notes now exist with proper hierarchy
+
+**Phase 3: Update Content** 📝
+- Fetches full content from Notion for each page
+- Converts Notion blocks to HTML
+- Resolves all internal links using the complete page mapping
+- Updates each Trilium note with its content
+
+**Benefits of this approach:**
+- ✅ **Perfect hierarchy preservation** - Parents always exist before children
+- ✅ **Working internal links** - All target notes exist when links are resolved
+- ✅ **Clear progress tracking** - See exactly which phase you're in
+- ✅ **Better error recovery** - Structure is preserved even if content updates fail
+- ✅ **Efficient** - Metadata scanning is much faster than full content fetching
 
 ### Incremental/Subsequent Imports
 

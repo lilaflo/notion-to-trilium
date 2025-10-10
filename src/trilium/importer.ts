@@ -256,7 +256,7 @@ export async function createParentNote(title: string, parentNoteId: string = 'ro
   try {
     logger.debug(`Creating parent note: ${title} under ${parentNoteId}`);
 
-    const response = await etapiRequest<ETAPINote>('/create-note', {
+    const response = await etapiRequest<any>('/create-note', {
       method: 'POST',
       body: {
         parentNoteId,
@@ -267,12 +267,18 @@ export async function createParentNote(title: string, parentNoteId: string = 'ro
       },
     });
 
-    if (response.noteId) {
-      logger.success(`Created parent note: "${title}" (${response.noteId})`);
-      return response.noteId;
+    logger.debug(`Create note response: ${JSON.stringify(response)}`);
+
+    // Try different possible response formats
+    const noteId = response.noteId || response.note?.noteId || response.id;
+
+    if (noteId) {
+      logger.success(`Created parent note: "${title}" (${noteId})`);
+      return noteId;
     }
 
     logger.error('Failed to create parent note - no noteId returned');
+    logger.error(`Response structure: ${JSON.stringify(response, null, 2)}`);
     return null;
   } catch (error) {
     logger.error(`Failed to create parent note "${title}"`, error);

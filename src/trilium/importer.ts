@@ -58,7 +58,7 @@ export async function rebuildHierarchyInTrilium(
         : rootParentNoteId;
 
       // Create empty note with just title
-      const noteId = await createEmptyNote(pageMeta.title, triliumParentId);
+      const noteId = await createEmptyNote(pageMeta.title, triliumParentId, pageMeta.id);
 
       if (noteId) {
         pageMapping.set(pageMeta.id, noteId);
@@ -116,13 +116,24 @@ function sortPagesByHierarchy(pages: NotionPageMetadata[]): NotionPageMetadata[]
 
 /**
  * Creates an empty note in Trilium (just title, no content)
+ * Checks for existing notes with the same notionId to avoid duplicates
  * This is faster than creating notes with content
  */
 async function createEmptyNote(
   title: string,
-  parentNoteId: string
+  parentNoteId: string,
+  notionPageId: string
 ): Promise<string | null> {
   try {
+    // Check if a note with this notionId already exists
+    const existingNoteId = await findExistingNotionNote(notionPageId);
+
+    if (existingNoteId) {
+      logger.debug(`Reusing existing note for "${title}" (${existingNoteId})`);
+      return existingNoteId;
+    }
+
+    // Create new note if it doesn't exist
     const response = await etapiRequest<any>('/create-note', {
       method: 'POST',
       body: {
@@ -141,6 +152,22 @@ async function createEmptyNote(
       logger.error(`No noteId in response for "${title}"`);
       logger.debug(`Response structure: ${JSON.stringify(response, null, 2)}`);
       return null;
+    }
+
+    // Add notionId attribute immediately so future checks can find it
+    try {
+      await etapiRequest('/attributes', {
+        method: 'POST',
+        body: {
+          noteId,
+          type: 'label',
+          name: 'notionId',
+          value: notionPageId,
+        },
+      });
+      logger.debug(`Added notionId attribute to note ${noteId}`);
+    } catch (error) {
+      logger.warn(`Failed to add notionId attribute to note ${noteId}`, error);
     }
 
     return noteId;

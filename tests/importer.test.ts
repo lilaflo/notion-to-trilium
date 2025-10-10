@@ -1,6 +1,6 @@
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
-import { validateParentNote, createParentNote, sortPagesForImport, createNote } from '../src/trilium/importer.js';
-import type { NotionPage } from '../src/notion/types.js';
+import { validateParentNote, createParentNote, sortPagesForImport, createNote, findExistingNotionNote, rebuildHierarchyInTrilium } from '../src/trilium/importer.js';
+import type { NotionPage, NotionPageMetadata } from '../src/notion/types.js';
 import * as etapi from '../src/trilium/etapi.js';
 
 // Mock node-fetch
@@ -584,6 +584,227 @@ describe('Trilium Importer', () => {
       // - Clean import flow without errors
 
       expect(true).toBe(true);
+    });
+  });
+
+  describe('findExistingNotionNote', () => {
+    let mockEtapiRequest: any;
+
+    beforeEach(() => {
+      mockEtapiRequest = etapi.etapiRequest as jest.Mock;
+      jest.clearAllMocks();
+    });
+
+    it('should return note ID when note with notionId attribute exists', async () => {
+      const mockResponse = {
+        results: [
+          {
+            noteId: 'existing-note-123',
+            title: 'Existing Note',
+          },
+        ],
+      };
+
+      mockEtapiRequest.mockResolvedValue(mockResponse);
+
+      const result = await findExistingNotionNote('notion-page-abc');
+
+      expect(result).toBe('existing-note-123');
+      expect(mockEtapiRequest).toHaveBeenCalledWith('/notes?search=@notionId="notion-page-abc"');
+    });
+
+    it('should return null when no note with notionId attribute exists', async () => {
+      const mockResponse = {
+        results: [],
+      };
+
+      mockEtapiRequest.mockResolvedValue(mockResponse);
+
+      const result = await findExistingNotionNote('notion-page-xyz');
+
+      expect(result).toBeNull();
+      expect(mockEtapiRequest).toHaveBeenCalledWith('/notes?search=@notionId="notion-page-xyz"');
+    });
+
+    it('should return null on API error', async () => {
+      const error = new Error('ETAPI request failed');
+
+      mockEtapiRequest.mockRejectedValue(error);
+
+      const result = await findExistingNotionNote('notion-page-error');
+
+      expect(result).toBeNull();
+    });
+
+    it('should handle response with multiple results (return first)', async () => {
+      const mockResponse = {
+        results: [
+          { noteId: 'note-1', title: 'Note 1' },
+          { noteId: 'note-2', title: 'Note 2' },
+        ],
+      };
+
+      mockEtapiRequest.mockResolvedValue(mockResponse);
+
+      const result = await findExistingNotionNote('notion-page-abc');
+
+      expect(result).toBe('note-1');
+    });
+  });
+
+  describe('rebuildHierarchyInTrilium', () => {
+    let mockEtapiRequest: any;
+
+    const createMockPageMeta = (id: string, title: string, parentId: string | null = null): NotionPageMetadata => ({
+      id,
+      title,
+      parentId,
+      url: `https://notion.so/${id}`,
+      createdTime: '2024-01-01T00:00:00.000Z',
+      lastEditedTime: '2024-01-01T00:00:00.000Z',
+    });
+
+    beforeEach(() => {
+      mockEtapiRequest = etapi.etapiRequest as jest.Mock;
+      jest.clearAllMocks();
+    });
+
+    it('should reuse existing note when notionId attribute exists', async () => {
+      const pageMeta = createMockPageMeta('notion-page-1', 'Existing Page');
+
+      // First call: search for existing note (returns existing)
+      mockEtapiRequest.mockResolvedValueOnce({
+        results: [{ noteId: 'existing-note-123' }],
+      });
+
+      const result = await rebuildHierarchyInTrilium([pageMeta], 'root', false);
+
+      expect(result.get('notion-page-1')).toBe('existing-note-123');
+
+      // Should only search for existing note, not create a new one
+      expect(mockEtapiRequest).toHaveBeenCalledWith('/notes?search=@notionId="notion-page-1"');
+      expect(mockEtapiRequest).not.toHaveBeenCalledWith('/create-note', expect.anything());
+    });
+
+    it('should create new note and add notionId attribute when note does not exist', async () => {
+      const pageMeta = createMockPageMeta('notion-page-2', 'New Page');
+
+      // First call: search for existing note (returns empty)
+      mockEtapiRequest.mockResolvedValueOnce({
+        results: [],
+      });
+
+      // Second call: create new note
+      mockEtapiRequest.mockResolvedValueOnce({
+        noteId: 'new-note-456',
+        title: 'New Page',
+      });
+
+      // Third call: add notionId attribute
+      mockEtapiRequest.mockResolvedValueOnce({
+        attributeId: 'attr-789',
+      });
+
+      const result = await rebuildHierarchyInTrilium([pageMeta], 'root', false);
+
+      expect(result.get('notion-page-2')).toBe('new-note-456');
+
+      // Should search, create, and add attribute
+      expect(mockEtapiRequest).toHaveBeenCalledWith('/notes?search=@notionId="notion-page-2"');
+      expect(mockEtapiRequest).toHaveBeenCalledWith('/create-note', {
+        method: 'POST',
+        body: {
+          parentNoteId: 'root',
+          title: 'New Page',
+          type: 'text',
+          content: '',
+          mime: 'text/html',
+        },
+      });
+      expect(mockEtapiRequest).toHaveBeenCalledWith('/attributes', {
+        method: 'POST',
+        body: {
+          noteId: 'new-note-456',
+          type: 'label',
+          name: 'notionId',
+          value: 'notion-page-2',
+        },
+      });
+    });
+
+    it('should handle multiple pages with some existing and some new', async () => {
+      const pages = [
+        createMockPageMeta('notion-1', 'Existing Page'),
+        createMockPageMeta('notion-2', 'New Page'),
+      ];
+
+      // First page: existing
+      mockEtapiRequest.mockResolvedValueOnce({
+        results: [{ noteId: 'existing-note-1' }],
+      });
+
+      // Second page: new (search returns empty)
+      mockEtapiRequest.mockResolvedValueOnce({
+        results: [],
+      });
+
+      // Second page: create
+      mockEtapiRequest.mockResolvedValueOnce({
+        noteId: 'new-note-2',
+      });
+
+      // Second page: add attribute
+      mockEtapiRequest.mockResolvedValueOnce({
+        attributeId: 'attr-2',
+      });
+
+      const result = await rebuildHierarchyInTrilium(pages, 'root', false);
+
+      expect(result.get('notion-1')).toBe('existing-note-1');
+      expect(result.get('notion-2')).toBe('new-note-2');
+      expect(result.size).toBe(2);
+    });
+
+    it('should skip creating notes in dry run mode', async () => {
+      const pageMeta = createMockPageMeta('notion-page-3', 'Dry Run Page');
+
+      const result = await rebuildHierarchyInTrilium([pageMeta], 'root', true);
+
+      expect(result.size).toBe(0);
+      expect(mockEtapiRequest).not.toHaveBeenCalled();
+    });
+
+    it('should preserve parent-child relationships', async () => {
+      const parent = createMockPageMeta('notion-parent', 'Parent Page');
+      const child = createMockPageMeta('notion-child', 'Child Page', 'notion-parent');
+
+      // Parent: search (not found)
+      mockEtapiRequest.mockResolvedValueOnce({ results: [] });
+      // Parent: create
+      mockEtapiRequest.mockResolvedValueOnce({ noteId: 'trilium-parent' });
+      // Parent: add attribute
+      mockEtapiRequest.mockResolvedValueOnce({ attributeId: 'attr-p' });
+
+      // Child: search (not found)
+      mockEtapiRequest.mockResolvedValueOnce({ results: [] });
+      // Child: create
+      mockEtapiRequest.mockResolvedValueOnce({ noteId: 'trilium-child' });
+      // Child: add attribute
+      mockEtapiRequest.mockResolvedValueOnce({ attributeId: 'attr-c' });
+
+      const result = await rebuildHierarchyInTrilium([parent, child], 'root', false);
+
+      expect(result.get('notion-parent')).toBe('trilium-parent');
+      expect(result.get('notion-child')).toBe('trilium-child');
+
+      // Verify child was created under parent
+      expect(mockEtapiRequest).toHaveBeenCalledWith('/create-note', {
+        method: 'POST',
+        body: expect.objectContaining({
+          parentNoteId: 'trilium-parent',
+          title: 'Child Page',
+        }),
+      });
     });
   });
 });

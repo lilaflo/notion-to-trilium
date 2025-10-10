@@ -10,6 +10,7 @@ A TypeScript-based CLI tool to migrate your notes from Notion to Trilium Notes. 
 - 🎨 **Rich Content Support** - Converts Notion blocks to HTML with formatting, images, code blocks, and more
 - 🔗 **Internal Link Resolution** - Automatically converts Notion internal links to Trilium note links
 - ⚡ **Streaming Import** - Pages are imported to Trilium immediately as they're fetched from Notion
+- 🔄 **Duplicate Prevention** - Automatically detects and reuses existing notes to avoid duplicates when re-running imports
 - 📊 **Progress Tracking** - Real-time progress reporting during import
 - 🔍 **Dry Run Mode** - Preview what will be imported without making changes
 - 🏷️ **Metadata Preservation** - Stores Notion IDs and URLs as Trilium attributes
@@ -207,6 +208,10 @@ The tool uses a **three-phase import architecture** that ensures perfect hierarc
 **Phase 2: Rebuild Hierarchy** 🏗️
 - Creates empty notes in Trilium with correct parent-child relationships
 - Uses topological sort to ensure parents are created before children
+- **Duplicate Prevention**: Automatically detects existing notes using `notionId` attributes
+  - If a note with the same Notion page ID already exists in Trilium, it is reused
+  - New notes are immediately tagged with `notionId` attribute for future detection
+  - Safe to re-run imports without creating duplicates
 - Builds mapping of Notion page IDs to Trilium note IDs
 - All notes now exist with proper hierarchy
 
@@ -237,6 +242,37 @@ The cache is automatically created and updated with each import. The first impor
 - Total pages tracked
 - Number of imported pages
 - Number of pending pages
+
+### Re-running Imports (Duplicate Prevention)
+
+The tool includes **intelligent duplicate prevention** that makes it safe to re-run imports multiple times without creating duplicate notes.
+
+**How it works**:
+- Each imported note is tagged with a `notionId` attribute containing the Notion page ID
+- Before creating a new note, the tool searches for existing notes with that `notionId`
+- If found, the existing note is reused instead of creating a duplicate
+- This works across all import runs, even if you restart the import process
+
+**Use cases**:
+- **Interrupted imports**: If an import fails partway through, simply run it again - existing notes will be reused
+- **Content updates**: Re-run the import to update content for modified pages without creating duplicates
+- **Structure fixes**: Delete problematic notes in Trilium and re-run to recreate them cleanly
+- **Incremental imports**: Add new pages in Notion and re-run to import only the new ones
+
+**Example workflow**:
+```bash
+# First import (creates all notes)
+pnpm start
+
+# Later, add new pages in Notion or modify existing ones
+# Re-run the import - existing notes are reused, new notes are created
+pnpm start
+```
+
+**Technical details**:
+- The `notionId` attribute is added to notes immediately when they're created in Phase 2
+- Search is performed using Trilium's attribute search: `@notionId="page-id"`
+- Works independently of the cache system for maximum reliability
 
 ### Error Logging and Tracking
 

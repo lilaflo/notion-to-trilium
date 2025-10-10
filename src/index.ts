@@ -76,7 +76,7 @@ async function main() {
     console.log('');
     console.log('╔═══════════════════════════════════════════════════╗');
     console.log('║                                                   ║');
-    console.log('║        Notion to Trilium Import Tool             ║');
+    console.log('║        Notion to Trilium Import Tool              ║');
     console.log('║                                                   ║');
     console.log('╚═══════════════════════════════════════════════════╝');
     console.log('');

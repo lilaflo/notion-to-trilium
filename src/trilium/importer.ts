@@ -143,9 +143,9 @@ async function createEmptyNote(
     if (existingNoteId) {
       logger.debug(`Found existing note in Trilium for "${title}" (${existingNoteId})`);
 
-      // Store in cache for future lookups
+      // Store Trilium note ID in cache for future lookups (but don't mark as imported yet)
       if (cache) {
-        cache.markImported(notionPageId, existingNoteId);
+        cache.setTriliumNoteId(notionPageId, existingNoteId);
       }
 
       return existingNoteId;
@@ -188,9 +188,10 @@ async function createEmptyNote(
       logger.warn(`Failed to add notionId attribute to note ${noteId}`, error);
     }
 
-    // Store in cache for future lookups
+    // Store Trilium note ID in cache for future lookups (but don't mark as imported yet)
+    // Note: Will be marked as imported in Phase 3 after content is added
     if (cache) {
-      cache.markImported(notionPageId, noteId);
+      cache.setTriliumNoteId(notionPageId, noteId);
     }
 
     return noteId;
@@ -207,14 +208,17 @@ async function createEmptyNote(
  * @param client - Notion API client
  * @param pagesMetadata - Array of page metadata
  * @param pageMapping - Mapping of Notion IDs to Trilium IDs from Phase 2
+ * @param fetchContentFn - Function to fetch content for a page
  * @param dryRun - If true, only logs what would be updated
+ * @param cache - Optional cache instance to mark pages as imported after content update
  * @returns Statistics about the update process
  */
 export async function updateNoteContent(
   pagesMetadata: NotionPageMetadata[],
   pageMapping: PageMapping,
   fetchContentFn: (pageId: string) => Promise<any[]>, // Function to fetch content
-  dryRun: boolean = false
+  dryRun: boolean = false,
+  cache?: NotionCache
 ): Promise<{ successful: number; failed: number }> {
   const stats = { successful: 0, failed: 0 };
 
@@ -265,9 +269,22 @@ export async function updateNoteContent(
 
       stats.successful++;
       logger.debug(`Updated content for: ${pageMeta.title}`);
+
+      // Mark as successfully imported in cache (only after content update succeeds)
+      if (cache) {
+        cache.markImported(pageMeta.id, triliumNoteId);
+        cache.resolveErrors(pageMeta.id);
+      }
     } catch (error) {
       stats.failed++;
       logger.error(`Error updating content for "${pageMeta.title}"`, error);
+
+      // Log error in cache for tracking
+      if (cache) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorStack = error instanceof Error ? error.stack : undefined;
+        cache.logError(pageMeta.id, pageMeta.title, errorMessage, 'import', errorStack);
+      }
     }
   }
 

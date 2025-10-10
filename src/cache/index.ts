@@ -121,7 +121,25 @@ export class NotionCache {
   }
 
   /**
-   * Mark a page as imported
+   * Store the Trilium note ID for a Notion page without marking it as imported
+   * Used in Phase 2 when creating note structure
+   */
+  setTriliumNoteId(notionId: string, triliumNoteId: string): void {
+    const stmt = this.db.prepare(`
+      UPDATE notion_pages
+      SET
+        trilium_note_id = ?,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE notion_id = ?
+    `);
+
+    stmt.run(triliumNoteId, notionId);
+    logger.debug(`Set Trilium note ID: ${notionId} -> ${triliumNoteId}`);
+  }
+
+  /**
+   * Mark a page as imported with content
+   * Should only be called after Phase 3 content update succeeds
    */
   markImported(notionId: string, triliumNoteId: string): void {
     const stmt = this.db.prepare(`

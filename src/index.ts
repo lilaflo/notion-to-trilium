@@ -463,29 +463,12 @@ async function main() {
       pagesToImport,
       pageMapping,
       fetchContent,
-      config.DRY_RUN
+      config.DRY_RUN,
+      cache  // Pass cache so it can mark pages as imported after content update
     );
 
     stats.successful = contentStats.successful;
     stats.failed = contentStats.failed;
-
-    // Update cache for successful imports
-    if (cache) {
-      for (const pageMeta of pagesToImport) {
-        const noteId = pageMapping.get(pageMeta.id);
-        if (noteId && contentStats.successful > 0) {
-          cache.markImported(pageMeta.id, noteId);
-          cache.resolveErrors(pageMeta.id);
-        } else if (!noteId) {
-          cache.logError(
-            pageMeta.id,
-            pageMeta.title,
-            'Failed to create note in Trilium during hierarchy phase',
-            'import'
-          );
-        }
-      }
-    }
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
 

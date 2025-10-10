@@ -3,10 +3,17 @@ import { validateParentNote, createParentNote, sortPagesForImport, createNote } 
 import type { NotionPage } from '../src/notion/types.js';
 import * as etapi from '../src/trilium/etapi.js';
 
+// Mock node-fetch
+jest.mock('node-fetch', () => ({
+  default: jest.fn(),
+}));
+
 // Mock the etapi module
 jest.mock('../src/trilium/etapi.js', () => ({
   etapiRequest: jest.fn(),
   initETAPI: jest.fn(),
+  getETAPIBaseUrl: jest.fn(() => 'http://localhost:8080'),
+  getETAPIAuthHeader: jest.fn(() => 'Basic dGVzdDp0b2tlbg=='),
 }));
 
 describe('Trilium Importer', () => {

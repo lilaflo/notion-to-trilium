@@ -164,6 +164,7 @@ The tool uses a **three-phase import architecture** that ensures perfect hierarc
 - Quickly scans all Notion pages to get metadata (ID, title, parent relationships)
 - Much faster than fetching full content
 - Builds complete picture of your Notion workspace structure
+- **Database Handling**: Pages within Notion databases are automatically placed under the database's parent page in the hierarchy
 - **Displays ASCII tree preview** - See exactly what will be imported
 - **Asks for confirmation** - Proceed or cancel before creating anything
 - No content is fetched yet

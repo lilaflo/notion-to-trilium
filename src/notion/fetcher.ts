@@ -80,8 +80,58 @@ async function scanAllAccessiblePages(
   metadata: NotionPageMetadata[],
   processedIds: Set<string>
 ): Promise<void> {
+  // First, scan for all databases to understand the structure
+  const databaseMap = new Map<string, { id: string; title: string; parentId: string | null }>();
+
+  logger.debug('Scanning databases...');
   let hasMore = true;
   let startCursor: string | undefined;
+
+  // Scan databases
+  while (hasMore) {
+    const response = await client.search({
+      filter: { property: 'object', value: 'database' },
+      start_cursor: startCursor,
+      page_size: 100,
+    });
+
+    for (const result of response.results) {
+      if ('object' in result && result.object === 'database' && 'parent' in result) {
+        const db = result as any;
+        let dbParentId: string | null = null;
+
+        if (db.parent) {
+          if (db.parent.type === 'page_id') {
+            dbParentId = db.parent.page_id;
+          } else if (db.parent.type === 'database_id') {
+            dbParentId = db.parent.database_id;
+          }
+        }
+
+        // Extract database title
+        let dbTitle = 'Untitled Database';
+        if (db.title && Array.isArray(db.title)) {
+          dbTitle = db.title.map((t: any) => t.plain_text || '').join('') || 'Untitled Database';
+        }
+
+        databaseMap.set(db.id, {
+          id: db.id,
+          title: dbTitle,
+          parentId: dbParentId,
+        });
+
+        logger.debug(`Found database: ${dbTitle} (parent: ${dbParentId || 'workspace'})`);
+      }
+    }
+
+    hasMore = response.has_more;
+    startCursor = response.next_cursor || undefined;
+  }
+
+  // Now scan pages
+  logger.debug('Scanning pages...');
+  hasMore = true;
+  startCursor = undefined;
 
   while (hasMore) {
     const response = await client.search({
@@ -93,6 +143,15 @@ async function scanAllAccessiblePages(
     for (const result of response.results) {
       if ('object' in result && result.object === 'page' && isFullPage(result) && !processedIds.has(result.id)) {
         const pageMeta = extractPageMetadata(result);
+
+        // If this page's parent is a database, resolve to the database's parent
+        if (pageMeta.parentId && databaseMap.has(pageMeta.parentId)) {
+          const database = databaseMap.get(pageMeta.parentId)!;
+          logger.debug(`Page "${pageMeta.title}" is in database "${database.title}", parent will be: ${database.parentId || 'workspace'}`);
+          // Set parent to the database's parent (so pages go where the database is)
+          pageMeta.parentId = database.parentId;
+        }
+
         metadata.push(pageMeta);
         processedIds.add(result.id);
         logger.progress(metadata.length, metadata.length, `Scanned: ${pageMeta.title}`);

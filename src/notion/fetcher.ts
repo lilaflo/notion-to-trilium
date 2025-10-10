@@ -417,23 +417,34 @@ export async function fetchPageContent(
 }
 
 /**
- * Fetches all blocks (content) for a page or block
+ * Fetches all blocks (content) for a page or block with timeout and retry logic
  */
 async function fetchBlocks(
   client: Client,
-  blockId: string
+  blockId: string,
+  depth: number = 0,
+  maxDepth: number = 20
 ): Promise<NotionBlock[]> {
   const blocks: NotionBlock[] = [];
   let hasMore = true;
   let startCursor: string | undefined;
 
+  // Prevent infinite recursion
+  if (depth > maxDepth) {
+    logger.warn(`Max depth ${maxDepth} reached for block ${blockId}, stopping recursion`);
+    return blocks;
+  }
+
   try {
     while (hasMore) {
-      const response = await client.blocks.children.list({
-        block_id: blockId,
-        start_cursor: startCursor,
-        page_size: 100,
-      });
+      // Fetch with timeout and retry logic
+      const response = await fetchWithRetry(async () => {
+        return await client.blocks.children.list({
+          block_id: blockId,
+          start_cursor: startCursor,
+          page_size: 100,
+        });
+      }, `blocks for ${blockId}`);
 
       for (const block of response.results) {
         if (isFullBlock(block)) {
@@ -446,7 +457,7 @@ async function fetchBlocks(
 
           // Recursively fetch children if they exist
           if (block.has_children) {
-            notionBlock.children = await fetchBlocks(client, block.id);
+            notionBlock.children = await fetchBlocks(client, block.id, depth + 1, maxDepth);
           }
 
           blocks.push(notionBlock);
@@ -456,11 +467,64 @@ async function fetchBlocks(
       hasMore = response.has_more;
       startCursor = response.next_cursor || undefined;
     }
-  } catch (error) {
-    logger.error(`Failed to fetch blocks for ${blockId}`, error);
+  } catch (error: any) {
+    // Log but don't throw - return partial results
+    if (error.message?.includes('timeout')) {
+      logger.error(`Timeout fetching blocks for ${blockId} at depth ${depth} - returning partial results`);
+    } else {
+      logger.error(`Failed to fetch blocks for ${blockId} at depth ${depth}`, error);
+    }
   }
 
   return blocks;
+}
+
+/**
+ * Fetches with timeout and retry logic for rate limits
+ */
+async function fetchWithRetry<T>(
+  fetchFn: () => Promise<T>,
+  description: string,
+  maxRetries: number = 3,
+  timeoutMs: number = 30000
+): Promise<T> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      // Create timeout promise
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error(`Timeout after ${timeoutMs}ms fetching ${description}`)), timeoutMs);
+      });
+
+      // Race between fetch and timeout
+      const result = await Promise.race([fetchFn(), timeoutPromise]);
+      return result;
+    } catch (error: any) {
+      lastError = error;
+
+      // Check if it's a rate limit error (status 429)
+      if (error?.status === 429 || error?.code === 'rate_limited') {
+        const waitTime = Math.min(1000 * Math.pow(2, attempt), 10000); // Exponential backoff, max 10s
+        logger.warn(`Rate limited fetching ${description}, waiting ${waitTime}ms before retry ${attempt + 1}/${maxRetries}`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        continue;
+      }
+
+      // Check if it's a timeout
+      if (error?.message?.includes('Timeout')) {
+        if (attempt < maxRetries) {
+          logger.warn(`Timeout fetching ${description}, retry ${attempt + 1}/${maxRetries}`);
+          continue;
+        }
+      }
+
+      // For other errors, don't retry
+      throw error;
+    }
+  }
+
+  throw lastError || new Error(`Failed to fetch ${description} after ${maxRetries} retries`);
 }
 
 /**

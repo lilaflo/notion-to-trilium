@@ -145,6 +145,50 @@ The cache is automatically created and updated with each import. The first impor
 - Number of imported pages
 - Number of pending pages
 
+### Error Logging and Tracking
+
+The tool automatically logs all import errors to the cache database for later analysis. When pages fail to import, you'll see:
+
+1. **Real-time error display** in the console during import
+2. **Error summary** at the end if any imports failed
+3. **Persistent error logs** stored in the `.notion-cache.db` database
+
+**View Error Logs**:
+```bash
+# List all unresolved errors
+pnpm errors list
+
+# Show error statistics
+pnpm errors stats
+
+# Show detailed error summary with recent errors
+pnpm errors summary
+
+# Filter errors by phase (fetch, convert, or import)
+pnpm errors list --phase import --limit 20
+
+# Mark errors for a specific page as resolved
+pnpm errors resolve <notion-page-id>
+
+# Clear all error logs
+pnpm errors clear --confirm
+```
+
+**Error Information Tracked**:
+- Notion page ID and title
+- Error message and stack trace
+- Phase where error occurred (fetch, convert, or import)
+- Timestamp
+- Retry count (for recurring errors)
+
+**Common Use Cases**:
+- **Identify problematic pages**: Find which specific pages are failing to import
+- **Analyze error patterns**: See if errors are concentrated in specific phases
+- **Retry imports**: After fixing issues, re-run the import and previously failed pages will be retried
+- **Track progress**: Monitor which errors get resolved over time
+
+Errors are automatically marked as resolved when a page successfully imports on a subsequent run.
+
 ### Log Levels
 
 Adjust `LOG_LEVEL` in `.env`:
@@ -314,7 +358,43 @@ This error occurs when you specify a `TRILIUM_PARENT_NOTE_ID` that either doesn'
 
 The converter handles most common Notion block types. If you encounter issues:
 - Check the console output for warnings about unsupported block types
+- Run `pnpm errors list --phase convert` to see conversion errors
 - File an issue with example block type that's not converting correctly
+
+### Analyzing Import Errors
+
+If you're experiencing many import errors, especially with nested notes:
+
+1. **Check error statistics**:
+   ```bash
+   pnpm errors stats
+   ```
+
+2. **View detailed error logs**:
+   ```bash
+   pnpm errors summary
+   ```
+
+3. **Filter by error type**:
+   ```bash
+   # See only import errors
+   pnpm errors list --phase import
+
+   # See only fetch errors
+   pnpm errors list --phase fetch
+   ```
+
+4. **Investigate specific pages**:
+   - Note the Notion page IDs from the error logs
+   - Check those pages in Notion for unusual content or formatting
+   - Look for patterns (e.g., all errors in pages with certain block types)
+
+5. **Query the database directly**:
+   ```bash
+   sqlite3 .notion-cache.db "SELECT * FROM import_errors WHERE resolved = 0 ORDER BY timestamp DESC LIMIT 10;"
+   ```
+
+The error logging system helps you understand exactly which pages are failing and why, making it easier to fix issues and retry imports.
 
 ## Contributing
 

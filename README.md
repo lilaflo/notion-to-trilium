@@ -75,9 +75,6 @@ Edit `.env` with your configuration:
 # Notion Configuration
 NOTION_TOKEN=your_notion_integration_token_here
 
-# Optional: Import only a specific page and its children
-# NOTION_ROOT_PAGE_ID=abc123def456
-
 # Trilium Configuration
 TRILIUM_URL=http://localhost:8080
 TRILIUM_TOKEN=your_trilium_etapi_token_here
@@ -85,14 +82,33 @@ TRILIUM_TOKEN=your_trilium_etapi_token_here
 # Optional: Parent note ID in Trilium where imported notes will be created
 # If not specified or set to 'root', a "Notion Import (YYYY-MM-DD)" folder will be created automatically
 # TRILIUM_PARENT_NOTE_ID=root
-
-# Import Options
-DRY_RUN=false
-STRUCTURE_ONLY=false
-LOG_LEVEL=info
 ```
 
+**Note**: Import options like `--dry-run`, `--structure-only`, `--log-level`, and `--root-page-id` are now CLI arguments. See the Usage section below for details.
+
 ## Usage
+
+### Command Line Options
+
+The tool now uses CLI arguments for import options. Run with `--help` to see all available options:
+
+```bash
+# Via pnpm (note the -- separator between pnpm and the CLI flags)
+pnpm start -- --help
+
+# Or run directly with node
+node dist/index.js --help
+```
+
+**Note**: When using `pnpm start`, you need the `--` separator to pass arguments to the script (e.g., `pnpm start -- --dry-run`). When running directly with node, you don't need it (e.g., `node dist/index.js --dry-run`).
+
+Available options:
+- `-r, --root-page-id <id>` - Notion root page ID to start import from (imports only this page and its children)
+- `-d, --dry-run` - Preview import without making changes
+- `-s, --structure-only` - Only create note structure (no content)
+- `-l, --log-level <level>` - Set log level (debug, info, warn, error)
+- `-V, --version` - Output version number
+- `-h, --help` - Display help
 
 ### Basic Import
 
@@ -103,26 +119,19 @@ pnpm start
 
 By default, if you haven't specified a `TRILIUM_PARENT_NOTE_ID` in your `.env` file, the tool will automatically create a **"Notion Import (YYYY-MM-DD)"** folder in your Trilium root to keep all imported notes organized. You can move or rename this folder later in Trilium.
 
-Or using the dev script (with hot reload):
-```bash
-pnpm dev
-```
-
 ### Dry Run
 
 Preview what will be imported without making changes:
 ```bash
-# Set DRY_RUN=true in .env, then run:
-pnpm start
+pnpm start -- --dry-run
 ```
 
 ### Structure-Only Mode (Recommended for First Import)
 
-**For your first import, it's highly recommended to use STRUCTURE_ONLY mode** to verify the hierarchy before filling in content:
+**For your first import, it's highly recommended to use structure-only mode** to verify the hierarchy before filling in content:
 
 ```bash
-# Set STRUCTURE_ONLY=true in .env, then run:
-pnpm start
+pnpm start -- --structure-only
 ```
 
 This will:
@@ -132,7 +141,7 @@ This will:
 
 After verifying the hierarchy looks correct:
 ```bash
-# Set STRUCTURE_ONLY=false in .env, then run again:
+# Run again without --structure-only:
 pnpm start
 ```
 
@@ -149,12 +158,26 @@ This will:
 ### Import Specific Page
 
 To import only a specific page and its children:
-1. Get the page ID from Notion URL (e.g., `https://notion.so/My-Page-abc123def456`)
-2. Set `NOTION_ROOT_PAGE_ID=abc123def456` in `.env`
-3. **Important**: Make sure the page is shared with your integration (see Configuration section)
-4. Run `pnpm start`
+```bash
+pnpm start -- --root-page-id abc123def456
+```
+
+Where `abc123def456` is the page ID from the Notion URL (e.g., `https://notion.so/My-Page-abc123def456`)
+
+**Important**: Make sure the page is shared with your integration (see Configuration section)
 
 The tool will validate that the specified root page exists and is accessible before starting the import. If validation fails, you'll receive clear instructions on how to fix the issue.
+
+### Combining Options
+
+You can combine multiple options:
+```bash
+# Dry run with specific page and debug logging
+pnpm start -- --root-page-id abc123 --dry-run --log-level debug
+
+# Structure-only for specific page
+pnpm start -- --root-page-id abc123 --structure-only
+```
 
 ### Three-Phase Import Architecture
 
@@ -274,16 +297,25 @@ The tool automatically converts **Notion internal links** to **Trilium internal 
 
 **Tips for best results**:
 - Import all related pages together to maximize internal link conversion
-- When using `NOTION_ROOT_PAGE_ID`, ensure all linked pages are children of that root
-- Use `LOG_LEVEL=debug` to see link resolution details
+- When using `--root-page-id`, ensure all linked pages are children of that root
+- Use `--log-level debug` to see link resolution details
 
 ### Log Levels
 
-Adjust `LOG_LEVEL` in `.env`:
-- `debug` - Verbose output including all API calls and cache operations
-- `info` - Standard progress information (default)
-- `warn` - Warnings and errors only
-- `error` - Errors only
+Adjust log verbosity using the `--log-level` option:
+```bash
+# Debug - verbose output including all API calls
+pnpm start -- --log-level debug
+
+# Info - standard progress information (default)
+pnpm start -- --log-level info
+
+# Warn - warnings and errors only
+pnpm start -- --log-level warn
+
+# Error - errors only
+pnpm start -- --log-level error
+```
 
 ## Development
 
@@ -425,8 +457,8 @@ This error occurs when you specify a `TRILIUM_PARENT_NOTE_ID` that either doesn'
 **Solutions**:
 - The Notion API has rate limits - this is normal for large workspaces on first import
 - Subsequent imports will be much faster thanks to the cache - only new/modified notes are processed
-- Consider using `NOTION_ROOT_PAGE_ID` to import specific pages
-- Use `LOG_LEVEL=debug` to see detailed progress
+- Consider using `--root-page-id` to import specific pages
+- Use `--log-level debug` to see detailed progress
 
 ### Cache-related issues
 
@@ -435,7 +467,7 @@ This error occurs when you specify a `TRILIUM_PARENT_NOTE_ID` that either doesn'
 **Solutions**:
 - Delete `.notion-cache.db` to force a full re-import
 - Check that Notion's `last_edited_time` is being updated (some changes may not update this field)
-- Use `LOG_LEVEL=debug` to see cache operations
+- Use `--log-level debug` to see cache operations
 
 **Issue**: Want to force re-import all notes
 

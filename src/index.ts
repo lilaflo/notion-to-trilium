@@ -2,7 +2,8 @@
 
 import * as readline from 'readline/promises';
 import { stdin as input, stdout as output } from 'process';
-import { getConfig } from './config/env.js';
+import { Command } from 'commander';
+import { getConfig, type CLIOptions } from './config/env.js';
 import { logger } from './utils/logger.js';
 import { createNotionClient } from './notion/client.js';
 import { scanNotionStructure, fetchPageContent, validateRootPage } from './notion/fetcher.js';
@@ -168,6 +169,29 @@ async function promptForParentNoteId(rl: readline.Interface): Promise<string | n
  * Main application entry point
  */
 async function main() {
+  // Parse CLI arguments FIRST before any other code
+  const program = new Command();
+
+  program
+    .name('notion-to-trilium')
+    .description('Import your Notion pages into Trilium Notes')
+    .version('1.0.0')
+    .option('-r, --root-page-id <id>', 'Notion root page ID to start import from')
+    .option('-d, --dry-run', 'Preview import without making changes', false)
+    .option('-s, --structure-only', 'Only create note structure (no content)', false)
+    .option('-l, --log-level <level>', 'Set log level (debug, info, warn, error)', 'info')
+    .parse(process.argv);
+
+  const options = program.opts();
+
+  // Build CLI options for config
+  const cliOptions: CLIOptions = {
+    rootPageId: options.rootPageId,
+    dryRun: options.dryRun,
+    structureOnly: options.structureOnly,
+    logLevel: options.logLevel as 'debug' | 'info' | 'warn' | 'error',
+  };
+
   try {
     // Print banner
     console.log('');
@@ -178,9 +202,9 @@ async function main() {
     console.log('╚═══════════════════════════════════════════════════╝');
     console.log('');
 
-    // Load and validate configuration
+    // Load and validate configuration with CLI overrides
     logger.info('Loading configuration...');
-    const config = getConfig();
+    const config = getConfig(cliOptions);
 
     // Set log level
     logger.setLevel(config.LOG_LEVEL);
@@ -207,7 +231,7 @@ async function main() {
         console.log('❌ The specified root page does not exist or is not accessible.');
         console.log('');
         console.log('💡 Please make sure:');
-        console.log('   1. The page ID is correct in your .env file (NOTION_ROOT_PAGE_ID)');
+        console.log('   1. The page ID is correct (use --root-page-id <id>)');
         console.log('   2. The page exists in your Notion workspace');
         console.log('   3. Your Notion integration has been granted access to this page');
         console.log('');
@@ -390,7 +414,7 @@ async function main() {
     if (config.DRY_RUN) {
       cache.close();
       console.log('');
-      console.log('💡 This was a dry run. Set DRY_RUN=false to import for real.');
+      console.log('💡 This was a dry run. Run without --dry-run flag to import for real.');
       console.log('');
       process.exit(0);
     }
@@ -414,8 +438,8 @@ async function main() {
       console.log('');
       console.log('💡 Next steps:');
       console.log('   1. Check your Trilium instance to verify the hierarchy');
-      console.log('   2. If it looks good, set STRUCTURE_ONLY=false in .env');
-      console.log('   3. Run the import again to fill in the content');
+      console.log('   2. If it looks good, run without --structure-only flag');
+      console.log('   3. Run: pnpm start (or npm start) to fill in the content');
       console.log('');
       console.log('ℹ️  Note: Empty notes have been created with correct parent-child');
       console.log('   relationships. Content will be added in Phase 3.');
@@ -485,7 +509,7 @@ async function main() {
     console.log('');
 
     if (config.DRY_RUN) {
-      console.log('💡 This was a dry run. Set DRY_RUN=false to import for real.');
+      console.log('💡 This was a dry run. Run without --dry-run flag to import for real.');
       console.log('');
     }
 

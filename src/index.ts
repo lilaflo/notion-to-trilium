@@ -92,6 +92,10 @@ async function main() {
       logger.warn('DRY RUN mode is enabled - no changes will be made');
     }
 
+    if (config.STRUCTURE_ONLY) {
+      logger.warn('STRUCTURE_ONLY mode is enabled - will stop after creating hierarchy');
+    }
+
     // Initialize Notion client
     logger.info('Initializing Notion client...');
     const notionClient = createNotionClient(config.NOTION_TOKEN);
@@ -246,6 +250,34 @@ async function main() {
       cache.close();
       console.log('');
       console.log('💡 This was a dry run. Set DRY_RUN=false to import for real.');
+      console.log('');
+      process.exit(0);
+    }
+
+    // Stop here if STRUCTURE_ONLY mode is enabled
+    if (config.STRUCTURE_ONLY) {
+      const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+      cache.close();
+
+      console.log('');
+      console.log('═══════════════════════════════════════════════════');
+      console.log('           Hierarchy Creation Complete             ');
+      console.log('═══════════════════════════════════════════════════');
+      console.log(`  📊 Total pages scanned:    ${stats.total}`);
+      console.log(`  🏗️  Notes created:          ${pageMapping.size}`);
+      console.log(`  ⏭️  Skipped (unchanged):   ${stats.skipped}`);
+      console.log(`  ⏱️  Duration:               ${duration}s`);
+      console.log('═══════════════════════════════════════════════════');
+      console.log('');
+      console.log('✅ Directory structure has been created in Trilium!');
+      console.log('');
+      console.log('💡 Next steps:');
+      console.log('   1. Check your Trilium instance to verify the hierarchy');
+      console.log('   2. If it looks good, set STRUCTURE_ONLY=false in .env');
+      console.log('   3. Run the import again to fill in the content');
+      console.log('');
+      console.log('ℹ️  Note: Empty notes have been created with correct parent-child');
+      console.log('   relationships. Content will be added in Phase 3.');
       console.log('');
       process.exit(0);
     }

@@ -14,6 +14,7 @@ const envSchema = z.object({
   TRILIUM_PARENT_NOTE_ID: z.string().optional().default('root'),
 
   DRY_RUN: z.string().optional().default('false').transform(val => val === 'true'),
+  STRUCTURE_ONLY: z.string().optional().default('false').transform(val => val === 'true'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).optional().default('info'),
 });
 

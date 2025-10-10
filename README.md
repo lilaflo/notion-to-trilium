@@ -87,6 +87,7 @@ TRILIUM_TOKEN=your_trilium_etapi_token_here
 
 # Import Options
 DRY_RUN=false
+STRUCTURE_ONLY=false
 LOG_LEVEL=info
 ```
 
@@ -111,6 +112,36 @@ Preview what will be imported without making changes:
 # Set DRY_RUN=true in .env, then run:
 pnpm start
 ```
+
+### Structure-Only Mode (Recommended for First Import)
+
+**For your first import, it's highly recommended to use STRUCTURE_ONLY mode** to verify the hierarchy before filling in content:
+
+```bash
+# Set STRUCTURE_ONLY=true in .env, then run:
+pnpm start
+```
+
+This will:
+1. **Phase 1**: Scan all Notion pages and get their metadata
+2. **Phase 2**: Create empty notes in Trilium with the correct hierarchy
+3. **Stop** - Let you verify the structure in Trilium
+
+After verifying the hierarchy looks correct:
+```bash
+# Set STRUCTURE_ONLY=false in .env, then run again:
+pnpm start
+```
+
+This will:
+- Skip Phase 1 & 2 (notes already exist with correct structure)
+- **Phase 3**: Fill in the content for all notes and resolve internal links
+
+**Why use this approach?**
+- ✅ Verify parent-child relationships are correct before adding content
+- ✅ Quickly see your entire Notion structure in Trilium
+- ✅ Easy to reorganize or delete notes if needed before content is added
+- ✅ Phase 3 is faster because structure already exists
 
 ### Import Specific Page
 

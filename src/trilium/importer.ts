@@ -169,8 +169,8 @@ export async function createNote(
 
     logger.debug(`Creating note "${page.title}" under parent ${triliumParentId}`);
 
-    // Convert Notion content to HTML
-    const htmlContent = convertPageToHtml(page);
+    // Convert Notion content to HTML with page mapping for internal links
+    const htmlContent = convertPageToHtml(page, pageMapping);
 
     // Create the note
     const response = await etapiRequest<any>('/create-note', {

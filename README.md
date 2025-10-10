@@ -8,6 +8,7 @@ A TypeScript-based CLI tool to migrate your notes from Notion to Trilium Notes. 
 - 🎯 **Selective Import** - Import specific pages and their children
 - 🏗️ **Structure Preservation** - Maintains parent-child relationships between notes
 - 🎨 **Rich Content Support** - Converts Notion blocks to HTML with formatting, images, code blocks, and more
+- 🔗 **Internal Link Resolution** - Automatically converts Notion internal links to Trilium note links
 - ⚡ **Streaming Import** - Pages are imported to Trilium immediately as they're fetched from Notion
 - 📊 **Progress Tracking** - Real-time progress reporting during import
 - 🔍 **Dry Run Mode** - Preview what will be imported without making changes
@@ -189,6 +190,36 @@ pnpm errors clear --confirm
 
 Errors are automatically marked as resolved when a page successfully imports on a subsequent run.
 
+### Internal Link Resolution
+
+The tool automatically converts **Notion internal links** to **Trilium internal links**, preserving your note references across the migration.
+
+**How it works**:
+1. As pages are imported, the tool builds a mapping of Notion page IDs to Trilium note IDs
+2. When converting content, any links to other Notion pages are detected
+3. These links are automatically converted to Trilium's internal link format (`#!noteId`)
+4. Links to pages that aren't being imported remain as external Notion URLs
+
+**Supported link formats**:
+- Standard Notion URLs: `https://www.notion.so/Page-Title-abc123...`
+- Workspace URLs: `https://www.notion.so/workspace/Page-Title-abc123...`
+- Links with or without dashes in the page ID
+- Links in all content types (paragraphs, headings, lists, tables, etc.)
+
+**Example**:
+- **Before**: `<a href="https://www.notion.so/My-Doc-abc123...">Link to doc</a>`
+- **After**: `<a href="#!trilium-note-456">Link to doc</a>`
+
+**Limitations**:
+- Only links to pages that are part of the import will be converted
+- Links to pages outside the import scope remain as external Notion URLs
+- Notion database views and advanced database links are preserved as external links
+
+**Tips for best results**:
+- Import all related pages together to maximize internal link conversion
+- When using `NOTION_ROOT_PAGE_ID`, ensure all linked pages are children of that root
+- Use `LOG_LEVEL=debug` to see link resolution details
+
 ### Log Levels
 
 Adjust `LOG_LEVEL` in `.env`:
@@ -249,7 +280,8 @@ notion-to-trilium/
 
 The following Notion block types are supported and converted to HTML:
 
-- ✅ Paragraphs with rich text (bold, italic, underline, strikethrough, code, links)
+- ✅ Paragraphs with rich text (bold, italic, underline, strikethrough, code)
+- ✅ Links (external URLs and internal page links with automatic resolution)
 - ✅ Headings (H1, H2, H3)
 - ✅ Lists (bulleted, numbered)
 - ✅ To-do items with checkboxes
@@ -259,7 +291,7 @@ The following Notion block types are supported and converted to HTML:
 - ✅ Images
 - ✅ Files and attachments
 - ✅ Bookmarks and embeds
-- ✅ Tables
+- ✅ Tables (including links in cells)
 - ✅ Toggles/collapsible content
 - ✅ Dividers
 

@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+pnpm-lock.yaml
+yarn.lock
+package-lock.json
+
+# Build output
+dist/
+
+# Environment variables
+.env
+.env.local
+
+# Cache
+.notion-cache.db
+.test-cache-*.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+coverage/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+.claude/

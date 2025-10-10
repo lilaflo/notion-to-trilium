@@ -244,7 +244,8 @@ export async function updateNoteContent(
       // Fetch content from Notion
       const content = await fetchContentFn(pageMeta.id);
 
-      logger.debug(`Fetched ${content?.length || 0} blocks for "${pageMeta.title}"`);
+      logger.debug(`Fetched ${content?.length || 0} blocks for "${pageMeta.title}" (type: ${typeof content})`);
+      logger.debug(`Content is array: ${Array.isArray(content)}, content value: ${JSON.stringify(content)?.substring(0, 200)}`);
 
       // Skip notes with no content - leave them as empty placeholders
       if (!content || content.length === 0) {
@@ -260,9 +261,26 @@ export async function updateNoteContent(
       };
 
       // Convert to HTML with link resolution
-      const htmlContent = convertPageToHtml(page, pageMapping);
+      let htmlContent: string;
+      try {
+        htmlContent = convertPageToHtml(page, pageMapping);
+        logger.debug(`Converted "${pageMeta.title}" to HTML (length: ${htmlContent?.length || 0}, type: ${typeof htmlContent})`);
 
-      logger.debug(`Converted "${pageMeta.title}" to HTML (length: ${htmlContent?.length || 0})`);
+        // Critical safety check: ensure htmlContent is a string
+        if (typeof htmlContent !== 'string') {
+          logger.error(`CRITICAL: Converter returned non-string for "${pageMeta.title}": ${typeof htmlContent}`);
+          htmlContent = '<div class="notion-page"><p>Error: Invalid content type from converter</p></div>';
+        }
+
+        // Ensure we have actual content
+        if (!htmlContent || htmlContent.trim().length === 0) {
+          logger.warn(`Converter returned empty string for "${pageMeta.title}", using placeholder`);
+          htmlContent = '<div class="notion-page"><p>This page has no content.</p></div>';
+        }
+      } catch (conversionError) {
+        logger.error(`Failed to convert "${pageMeta.title}" to HTML`, conversionError);
+        htmlContent = '<div class="notion-page"><p>Error converting content from Notion</p></div>';
+      }
 
       // Update the note in Trilium
       await updateNoteInTrilium(triliumNoteId, htmlContent, pageMeta);

@@ -1,5 +1,6 @@
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
-import { validateParentNote, createParentNote } from '../src/trilium/importer.js';
+import { validateParentNote, createParentNote, sortPagesForImport } from '../src/trilium/importer.js';
+import type { NotionPage } from '../src/notion/types.js';
 import * as etapi from '../src/trilium/etapi.js';
 
 // Mock the etapi module
@@ -208,6 +209,149 @@ describe('Trilium Importer', () => {
           title: 'Import from Notion (2024) - "Main"',
         }),
       }));
+    });
+  });
+
+  describe('sortPagesForImport', () => {
+    const createMockPage = (id: string, title: string, parentId: string | null = null): NotionPage => ({
+      id,
+      title,
+      content: [],
+      parentId,
+      url: `https://notion.so/${id}`,
+      createdTime: '2024-01-01T00:00:00.000Z',
+      lastEditedTime: '2024-01-01T00:00:00.000Z',
+    });
+
+    it('should return empty array for empty input', () => {
+      const result = sortPagesForImport([]);
+      expect(result).toEqual([]);
+    });
+
+    it('should return single page unchanged', () => {
+      const page = createMockPage('page-1', 'Page 1');
+      const result = sortPagesForImport([page]);
+      expect(result).toEqual([page]);
+    });
+
+    it('should preserve order for pages without parent relationships', () => {
+      const page1 = createMockPage('page-1', 'Page 1');
+      const page2 = createMockPage('page-2', 'Page 2');
+      const page3 = createMockPage('page-3', 'Page 3');
+
+      const result = sortPagesForImport([page1, page2, page3]);
+      expect(result).toHaveLength(3);
+      expect(result).toContain(page1);
+      expect(result).toContain(page2);
+      expect(result).toContain(page3);
+    });
+
+    it('should sort parent before child when child comes first', () => {
+      const parent = createMockPage('parent', 'Parent');
+      const child = createMockPage('child', 'Child', 'parent');
+
+      // Input: child first, parent second
+      const result = sortPagesForImport([child, parent]);
+
+      // Output: parent first, child second
+      expect(result).toHaveLength(2);
+      expect(result[0]).toEqual(parent);
+      expect(result[1]).toEqual(child);
+    });
+
+    it('should preserve parent-child order when already correct', () => {
+      const parent = createMockPage('parent', 'Parent');
+      const child = createMockPage('child', 'Child', 'parent');
+
+      // Input: parent first, child second (already correct)
+      const result = sortPagesForImport([parent, child]);
+
+      // Output: same order
+      expect(result).toHaveLength(2);
+      expect(result[0]).toEqual(parent);
+      expect(result[1]).toEqual(child);
+    });
+
+    it('should handle multi-level hierarchy', () => {
+      const grandparent = createMockPage('gp', 'Grandparent');
+      const parent = createMockPage('p', 'Parent', 'gp');
+      const child = createMockPage('c', 'Child', 'p');
+
+      // Input: scrambled order
+      const result = sortPagesForImport([child, grandparent, parent]);
+
+      // Output: grandparent → parent → child
+      expect(result).toHaveLength(3);
+      expect(result[0]).toEqual(grandparent);
+      expect(result[1]).toEqual(parent);
+      expect(result[2]).toEqual(child);
+    });
+
+    it('should handle multiple branches correctly', () => {
+      const root = createMockPage('root', 'Root');
+      const child1 = createMockPage('c1', 'Child 1', 'root');
+      const child2 = createMockPage('c2', 'Child 2', 'root');
+      const grandchild1 = createMockPage('gc1', 'Grandchild 1', 'c1');
+
+      // Input: scrambled order
+      const result = sortPagesForImport([grandchild1, child2, root, child1]);
+
+      // Output: root must come first, then its children, then grandchildren
+      expect(result).toHaveLength(4);
+      expect(result[0]).toEqual(root);
+
+      // Children can be in any order, but both should come before grandchild1
+      const rootIndex = result.indexOf(root);
+      const child1Index = result.indexOf(child1);
+      const child2Index = result.indexOf(child2);
+      const grandchild1Index = result.indexOf(grandchild1);
+
+      expect(child1Index).toBeGreaterThan(rootIndex);
+      expect(child2Index).toBeGreaterThan(rootIndex);
+      expect(grandchild1Index).toBeGreaterThan(child1Index);
+    });
+
+    it('should handle orphaned pages (parent not in set)', () => {
+      const orphan = createMockPage('orphan', 'Orphan', 'missing-parent');
+      const standalone = createMockPage('standalone', 'Standalone');
+
+      const result = sortPagesForImport([orphan, standalone]);
+
+      // Both pages should be included even though orphan's parent doesn't exist
+      expect(result).toHaveLength(2);
+      expect(result).toContain(orphan);
+      expect(result).toContain(standalone);
+    });
+
+    it('should handle deeply nested hierarchy', () => {
+      const level0 = createMockPage('l0', 'Level 0');
+      const level1 = createMockPage('l1', 'Level 1', 'l0');
+      const level2 = createMockPage('l2', 'Level 2', 'l1');
+      const level3 = createMockPage('l3', 'Level 3', 'l2');
+      const level4 = createMockPage('l4', 'Level 4', 'l3');
+
+      // Input: completely reversed
+      const result = sortPagesForImport([level4, level3, level2, level1, level0]);
+
+      // Output: correct order from root to leaf
+      expect(result).toHaveLength(5);
+      expect(result[0]).toEqual(level0);
+      expect(result[1]).toEqual(level1);
+      expect(result[2]).toEqual(level2);
+      expect(result[3]).toEqual(level3);
+      expect(result[4]).toEqual(level4);
+    });
+
+    it('should not modify input array', () => {
+      const parent = createMockPage('parent', 'Parent');
+      const child = createMockPage('child', 'Child', 'parent');
+      const input = [child, parent];
+      const inputCopy = [...input];
+
+      sortPagesForImport(input);
+
+      // Original input should be unchanged
+      expect(input).toEqual(inputCopy);
     });
   });
 });

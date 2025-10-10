@@ -21,8 +21,9 @@ type PageMapping = Map<string, string>;
 
 /**
  * Sorts pages in parent-first order to ensure parents are created before children
+ * Exported for testing purposes
  */
-function sortPagesForImport(pages: NotionPage[]): NotionPage[] {
+export function sortPagesForImport(pages: NotionPage[]): NotionPage[] {
   const pageMap = new Map<string, NotionPage>();
   const sorted: NotionPage[] = [];
   const visited = new Set<string>();

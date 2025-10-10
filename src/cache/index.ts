@@ -12,6 +12,17 @@ export interface CachedPage {
   triliumNoteId?: string;
 }
 
+export interface ImportError {
+  id: number;
+  notionId: string;
+  notionTitle: string;
+  errorMessage: string;
+  errorStack?: string;
+  phase: 'fetch' | 'convert' | 'import';
+  timestamp: string;
+  retryCount: number;
+}
+
 export class NotionCache {
   private db: Database.Database;
   private dbPath: string;
@@ -47,6 +58,23 @@ export class NotionCache {
 
       CREATE INDEX IF NOT EXISTS idx_imported ON notion_pages(imported);
       CREATE INDEX IF NOT EXISTS idx_last_edited ON notion_pages(last_edited_time);
+
+      CREATE TABLE IF NOT EXISTS import_errors (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        notion_id TEXT NOT NULL,
+        notion_title TEXT NOT NULL,
+        error_message TEXT NOT NULL,
+        error_stack TEXT,
+        phase TEXT NOT NULL,
+        timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+        retry_count INTEGER DEFAULT 0,
+        resolved INTEGER DEFAULT 0
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_errors_notion_id ON import_errors(notion_id);
+      CREATE INDEX IF NOT EXISTS idx_errors_phase ON import_errors(phase);
+      CREATE INDEX IF NOT EXISTS idx_errors_resolved ON import_errors(resolved);
+      CREATE INDEX IF NOT EXISTS idx_errors_timestamp ON import_errors(timestamp);
     `);
   }
 
@@ -213,5 +241,186 @@ export class NotionCache {
    */
   getDbPath(): string {
     return this.dbPath;
+  }
+
+  /**
+   * Log an import error
+   */
+  logError(
+    notionId: string,
+    notionTitle: string,
+    errorMessage: string,
+    phase: 'fetch' | 'convert' | 'import',
+    errorStack?: string
+  ): void {
+    // Check if this error has occurred before for this page and phase
+    const checkStmt = this.db.prepare(`
+      SELECT MAX(retry_count) as max_retry
+      FROM import_errors
+      WHERE notion_id = ? AND phase = ? AND resolved = 0
+    `);
+    const result = checkStmt.get(notionId, phase) as any;
+    const retryCount = result?.max_retry !== null ? result.max_retry + 1 : 0;
+
+    // Insert new error record
+    const stmt = this.db.prepare(`
+      INSERT INTO import_errors (notion_id, notion_title, error_message, error_stack, phase, retry_count)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(notionId, notionTitle, errorMessage, errorStack || null, phase, retryCount);
+    logger.debug(`Logged error for ${notionId} (${phase}): ${errorMessage}`);
+  }
+
+  /**
+   * Get all unresolved errors
+   */
+  getErrors(options?: {
+    notionId?: string;
+    phase?: 'fetch' | 'convert' | 'import';
+    limit?: number;
+  }): ImportError[] {
+    let query = `
+      SELECT
+        id,
+        notion_id as notionId,
+        notion_title as notionTitle,
+        error_message as errorMessage,
+        error_stack as errorStack,
+        phase,
+        timestamp,
+        retry_count as retryCount
+      FROM import_errors
+      WHERE resolved = 0
+    `;
+
+    const params: any[] = [];
+
+    if (options?.notionId) {
+      query += ' AND notion_id = ?';
+      params.push(options.notionId);
+    }
+
+    if (options?.phase) {
+      query += ' AND phase = ?';
+      params.push(options.phase);
+    }
+
+    query += ' ORDER BY timestamp DESC';
+
+    if (options?.limit) {
+      query += ' LIMIT ?';
+      params.push(options.limit);
+    }
+
+    const stmt = this.db.prepare(query);
+    return stmt.all(...params) as ImportError[];
+  }
+
+  /**
+   * Get error statistics
+   */
+  getErrorStats(): {
+    total: number;
+    byPhase: { fetch: number; convert: number; import: number };
+    recurring: number;
+  } {
+    const totalStmt = this.db.prepare(`
+      SELECT COUNT(DISTINCT notion_id) as total
+      FROM import_errors
+      WHERE resolved = 0
+    `);
+    const totalResult = totalStmt.get() as any;
+
+    const byPhaseStmt = this.db.prepare(`
+      SELECT
+        phase,
+        COUNT(DISTINCT notion_id) as count
+      FROM import_errors
+      WHERE resolved = 0
+      GROUP BY phase
+    `);
+    const phaseResults = byPhaseStmt.all() as any[];
+
+    const byPhase = {
+      fetch: 0,
+      convert: 0,
+      import: 0,
+    };
+
+    for (const row of phaseResults) {
+      byPhase[row.phase as keyof typeof byPhase] = row.count;
+    }
+
+    const recurringStmt = this.db.prepare(`
+      SELECT COUNT(DISTINCT notion_id) as recurring
+      FROM import_errors
+      WHERE resolved = 0 AND retry_count > 0
+    `);
+    const recurringResult = recurringStmt.get() as any;
+
+    return {
+      total: totalResult.total || 0,
+      byPhase,
+      recurring: recurringResult.recurring || 0,
+    };
+  }
+
+  /**
+   * Mark errors for a specific page as resolved
+   */
+  resolveErrors(notionId: string): void {
+    const stmt = this.db.prepare(`
+      UPDATE import_errors
+      SET resolved = 1
+      WHERE notion_id = ? AND resolved = 0
+    `);
+
+    stmt.run(notionId);
+    logger.debug(`Resolved errors for: ${notionId}`);
+  }
+
+  /**
+   * Clear all error logs
+   */
+  clearErrors(): void {
+    this.db.exec('DELETE FROM import_errors');
+    logger.info('Error logs cleared');
+  }
+
+  /**
+   * Get a summary report of recent errors
+   */
+  getErrorSummary(limit: number = 10): string {
+    const errors = this.getErrors({ limit });
+    const stats = this.getErrorStats();
+
+    let summary = '\n';
+    summary += '═══════════════════════════════════════════════════\n';
+    summary += '                  Error Summary                    \n';
+    summary += '═══════════════════════════════════════════════════\n';
+    summary += `  Total failed pages: ${stats.total}\n`;
+    summary += `  Fetch errors:       ${stats.byPhase.fetch}\n`;
+    summary += `  Convert errors:     ${stats.byPhase.convert}\n`;
+    summary += `  Import errors:      ${stats.byPhase.import}\n`;
+    summary += `  Recurring failures: ${stats.recurring}\n`;
+    summary += '═══════════════════════════════════════════════════\n';
+
+    if (errors.length > 0) {
+      summary += '\nRecent Errors:\n\n';
+      for (const error of errors) {
+        summary += `❌ ${error.notionTitle}\n`;
+        summary += `   ID: ${error.notionId}\n`;
+        summary += `   Phase: ${error.phase}\n`;
+        summary += `   Error: ${error.errorMessage}\n`;
+        summary += `   Time: ${error.timestamp}\n`;
+        if (error.retryCount > 0) {
+          summary += `   Retries: ${error.retryCount}\n`;
+        }
+        summary += '\n';
+      }
+    }
+
+    return summary;
   }
 }

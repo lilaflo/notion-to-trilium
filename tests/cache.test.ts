@@ -233,4 +233,231 @@ describe('NotionCache', () => {
       expect(dbPath).toBe(testDbPath);
     });
   });
+
+  describe('error logging', () => {
+    describe('logError', () => {
+      it('should log an import error', () => {
+        cache.logError(
+          'page-123',
+          'Test Page',
+          'Failed to create note',
+          'import'
+        );
+
+        const errors = cache.getErrors();
+        expect(errors).toHaveLength(1);
+        expect(errors[0].notionId).toBe('page-123');
+        expect(errors[0].notionTitle).toBe('Test Page');
+        expect(errors[0].errorMessage).toBe('Failed to create note');
+        expect(errors[0].phase).toBe('import');
+        expect(errors[0].retryCount).toBe(0);
+      });
+
+      it('should track retry count for repeated errors', () => {
+        cache.logError('page-123', 'Test Page', 'Error 1', 'import');
+        cache.logError('page-123', 'Test Page', 'Error 2', 'import');
+        cache.logError('page-123', 'Test Page', 'Error 3', 'import');
+
+        const errors = cache.getErrors({ notionId: 'page-123' });
+        expect(errors).toHaveLength(3);
+
+        // Errors are sorted by timestamp DESC (most recent first)
+        // But retry count is based on previous errors, so latest has highest count
+        const retryCounts = errors.map(e => e.retryCount).sort((a, b) => a - b);
+        expect(retryCounts).toEqual([0, 1, 2]);
+      });
+
+      it('should store error stack trace', () => {
+        const errorStack = 'Error: Test error\n    at test.ts:123:45';
+
+        cache.logError(
+          'page-123',
+          'Test Page',
+          'Test error',
+          'import',
+          errorStack
+        );
+
+        const errors = cache.getErrors();
+        expect(errors[0].errorStack).toBe(errorStack);
+      });
+
+      it('should log errors for different phases separately', () => {
+        cache.logError('page-123', 'Test Page', 'Fetch error', 'fetch');
+        cache.logError('page-123', 'Test Page', 'Convert error', 'convert');
+        cache.logError('page-123', 'Test Page', 'Import error', 'import');
+
+        const errors = cache.getErrors({ notionId: 'page-123' });
+        expect(errors).toHaveLength(3);
+
+        const phases = errors.map(e => e.phase);
+        expect(phases).toContain('fetch');
+        expect(phases).toContain('convert');
+        expect(phases).toContain('import');
+      });
+    });
+
+    describe('getErrors', () => {
+      beforeEach(() => {
+        cache.logError('page-1', 'Page 1', 'Error 1', 'fetch');
+        cache.logError('page-2', 'Page 2', 'Error 2', 'convert');
+        cache.logError('page-3', 'Page 3', 'Error 3', 'import');
+        cache.logError('page-4', 'Page 4', 'Error 4', 'import');
+      });
+
+      it('should return all errors', () => {
+        const errors = cache.getErrors();
+        expect(errors).toHaveLength(4);
+      });
+
+      it('should filter by notion ID', () => {
+        const errors = cache.getErrors({ notionId: 'page-2' });
+        expect(errors).toHaveLength(1);
+        expect(errors[0].notionId).toBe('page-2');
+      });
+
+      it('should filter by phase', () => {
+        const errors = cache.getErrors({ phase: 'import' });
+        expect(errors).toHaveLength(2);
+        expect(errors.every(e => e.phase === 'import')).toBe(true);
+      });
+
+      it('should limit results', () => {
+        const errors = cache.getErrors({ limit: 2 });
+        expect(errors).toHaveLength(2);
+      });
+
+      it('should return errors in descending timestamp order', () => {
+        const errors = cache.getErrors();
+        expect(errors.length).toBeGreaterThan(0);
+
+        // Most recent error should be first
+        for (let i = 1; i < errors.length; i++) {
+          const prev = new Date(errors[i - 1].timestamp).getTime();
+          const curr = new Date(errors[i].timestamp).getTime();
+          expect(prev).toBeGreaterThanOrEqual(curr);
+        }
+      });
+    });
+
+    describe('getErrorStats', () => {
+      it('should return error statistics', () => {
+        cache.logError('page-1', 'Page 1', 'Error 1', 'fetch');
+        cache.logError('page-2', 'Page 2', 'Error 2', 'convert');
+        cache.logError('page-3', 'Page 3', 'Error 3', 'import');
+        cache.logError('page-3', 'Page 3', 'Error 4', 'import');
+
+        const stats = cache.getErrorStats();
+        expect(stats.total).toBe(3); // Unique pages
+        expect(stats.byPhase.fetch).toBe(1);
+        expect(stats.byPhase.convert).toBe(1);
+        expect(stats.byPhase.import).toBe(1);
+        expect(stats.recurring).toBe(1); // page-3 has retry
+      });
+
+      it('should return zeros for no errors', () => {
+        const stats = cache.getErrorStats();
+        expect(stats.total).toBe(0);
+        expect(stats.byPhase.fetch).toBe(0);
+        expect(stats.byPhase.convert).toBe(0);
+        expect(stats.byPhase.import).toBe(0);
+        expect(stats.recurring).toBe(0);
+      });
+    });
+
+    describe('resolveErrors', () => {
+      it('should mark errors as resolved', () => {
+        cache.logError('page-123', 'Test Page', 'Error 1', 'import');
+        cache.logError('page-123', 'Test Page', 'Error 2', 'import');
+
+        let errors = cache.getErrors({ notionId: 'page-123' });
+        expect(errors).toHaveLength(2);
+
+        cache.resolveErrors('page-123');
+
+        errors = cache.getErrors({ notionId: 'page-123' });
+        expect(errors).toHaveLength(0);
+      });
+
+      it('should not affect errors for other pages', () => {
+        cache.logError('page-1', 'Page 1', 'Error 1', 'import');
+        cache.logError('page-2', 'Page 2', 'Error 2', 'import');
+
+        cache.resolveErrors('page-1');
+
+        const errors = cache.getErrors();
+        expect(errors).toHaveLength(1);
+        expect(errors[0].notionId).toBe('page-2');
+      });
+    });
+
+    describe('clearErrors', () => {
+      it('should remove all error logs', () => {
+        cache.logError('page-1', 'Page 1', 'Error 1', 'import');
+        cache.logError('page-2', 'Page 2', 'Error 2', 'import');
+
+        let errors = cache.getErrors();
+        expect(errors.length).toBeGreaterThan(0);
+
+        cache.clearErrors();
+
+        errors = cache.getErrors();
+        expect(errors).toHaveLength(0);
+      });
+    });
+
+    describe('getErrorSummary', () => {
+      it('should generate a formatted error summary', () => {
+        cache.logError('page-1', 'Test Page 1', 'Error message 1', 'import');
+        cache.logError('page-2', 'Test Page 2', 'Error message 2', 'fetch');
+
+        const summary = cache.getErrorSummary(10);
+
+        expect(summary).toContain('Error Summary');
+        expect(summary).toContain('Test Page 1');
+        expect(summary).toContain('Test Page 2');
+        expect(summary).toContain('Error message 1');
+        expect(summary).toContain('Error message 2');
+        expect(summary).toContain('import');
+        expect(summary).toContain('fetch');
+      });
+
+      it('should limit errors in summary', () => {
+        for (let i = 0; i < 20; i++) {
+          cache.logError(`page-${i}`, `Page ${i}`, `Error ${i}`, 'import');
+        }
+
+        const summary = cache.getErrorSummary(5);
+        const lines = summary.split('\n');
+
+        // Count error entries (each error has multiple lines)
+        const errorCount = (summary.match(/❌/g) || []).length;
+        expect(errorCount).toBeLessThanOrEqual(5);
+      });
+
+      it('should show no errors message when clean', () => {
+        const summary = cache.getErrorSummary();
+        expect(summary).toContain('Error Summary');
+        expect(summary).toContain('Total failed pages: 0');
+      });
+    });
+
+    describe('error resolution on successful import', () => {
+      it('should resolve errors when page is successfully imported', () => {
+        // Log an error
+        cache.logError('page-123', 'Test Page', 'Previous error', 'import');
+
+        let errors = cache.getErrors({ notionId: 'page-123' });
+        expect(errors).toHaveLength(1);
+
+        // Simulate successful import
+        cache.setPage('page-123', 'Test Page', '2025-01-01T00:00:00Z');
+        cache.markImported('page-123', 'note-456');
+        cache.resolveErrors('page-123');
+
+        errors = cache.getErrors({ notionId: 'page-123' });
+        expect(errors).toHaveLength(0);
+      });
+    });
+  });
 });

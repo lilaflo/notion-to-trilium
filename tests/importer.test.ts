@@ -1,5 +1,5 @@
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
-import { validateParentNote, createParentNote, sortPagesForImport } from '../src/trilium/importer.js';
+import { validateParentNote, createParentNote, sortPagesForImport, createNote } from '../src/trilium/importer.js';
 import type { NotionPage } from '../src/notion/types.js';
 import * as etapi from '../src/trilium/etapi.js';
 
@@ -352,6 +352,210 @@ describe('Trilium Importer', () => {
 
       // Original input should be unchanged
       expect(input).toEqual(inputCopy);
+    });
+  });
+
+  describe('createNote', () => {
+    let mockEtapiRequest: any;
+
+    const createMockPage = (id: string, title: string, parentId: string | null = null): NotionPage => ({
+      id,
+      title,
+      content: [],
+      parentId,
+      url: `https://notion.so/${id}`,
+      createdTime: '2024-01-01T00:00:00.000Z',
+      lastEditedTime: '2024-01-01T00:00:00.000Z',
+    });
+
+    beforeEach(() => {
+      mockEtapiRequest = etapi.etapiRequest as jest.Mock;
+      jest.clearAllMocks();
+    });
+
+    it('should create note without parent mapping', async () => {
+      const page = createMockPage('page-123', 'Test Page');
+      const mockResponse = {
+        noteId: 'note-456',
+        title: 'Test Page',
+        type: 'text',
+      };
+
+      mockEtapiRequest.mockResolvedValue(mockResponse);
+
+      const result = await createNote(page, 'root');
+
+      expect(result).toBe('note-456');
+      expect(mockEtapiRequest).toHaveBeenCalledWith('/create-note', {
+        method: 'POST',
+        body: expect.objectContaining({
+          parentNoteId: 'root',
+          title: 'Test Page',
+          type: 'text',
+          mime: 'text/html',
+        }),
+      });
+    });
+
+    it('should use mapped parent ID when available', async () => {
+      const page = createMockPage('page-123', 'Child Page', 'parent-notion-id');
+      const pageMapping = new Map([['parent-notion-id', 'parent-trilium-id']]);
+      const mockResponse = {
+        noteId: 'note-456',
+        title: 'Child Page',
+        type: 'text',
+      };
+
+      mockEtapiRequest.mockResolvedValue(mockResponse);
+
+      const result = await createNote(page, 'root', pageMapping);
+
+      expect(result).toBe('note-456');
+      expect(mockEtapiRequest).toHaveBeenCalledWith('/create-note', {
+        method: 'POST',
+        body: expect.objectContaining({
+          parentNoteId: 'parent-trilium-id',
+          title: 'Child Page',
+        }),
+      });
+    });
+
+    it('should fall back to default parent when mapping not found', async () => {
+      const page = createMockPage('page-123', 'Child Page', 'missing-parent');
+      const pageMapping = new Map([['other-parent', 'other-trilium-id']]);
+      const mockResponse = {
+        noteId: 'note-456',
+        title: 'Child Page',
+        type: 'text',
+      };
+
+      mockEtapiRequest.mockResolvedValue(mockResponse);
+
+      const result = await createNote(page, 'root', pageMapping);
+
+      expect(result).toBe('note-456');
+      expect(mockEtapiRequest).toHaveBeenCalledWith('/create-note', {
+        method: 'POST',
+        body: expect.objectContaining({
+          parentNoteId: 'root',
+          title: 'Child Page',
+        }),
+      });
+    });
+
+    it('should handle alternate response formats (note.noteId)', async () => {
+      const page = createMockPage('page-123', 'Test Page');
+      const mockResponse = {
+        note: {
+          noteId: 'note-789',
+          title: 'Test Page',
+        },
+      };
+
+      mockEtapiRequest.mockResolvedValue(mockResponse);
+
+      const result = await createNote(page, 'root');
+
+      expect(result).toBe('note-789');
+    });
+
+    it('should handle alternate response formats (id)', async () => {
+      const page = createMockPage('page-123', 'Test Page');
+      const mockResponse = {
+        id: 'note-abc',
+        title: 'Test Page',
+      };
+
+      mockEtapiRequest.mockResolvedValue(mockResponse);
+
+      const result = await createNote(page, 'root');
+
+      expect(result).toBe('note-abc');
+    });
+
+    it('should return null when no noteId in response', async () => {
+      const page = createMockPage('page-123', 'Failed Page');
+      const mockResponse = {
+        title: 'Failed Page',
+        type: 'text',
+      };
+
+      mockEtapiRequest.mockResolvedValue(mockResponse);
+
+      const result = await createNote(page, 'root');
+
+      expect(result).toBeNull();
+    });
+
+    it('should return null on API error', async () => {
+      const page = createMockPage('page-123', 'Error Page');
+      const error = new Error('ETAPI request failed');
+
+      mockEtapiRequest.mockRejectedValue(error);
+
+      const result = await createNote(page, 'root');
+
+      expect(result).toBeNull();
+    });
+
+    it('should handle pages with no title', async () => {
+      const page = createMockPage('page-123', '');
+      page.title = '';
+      const mockResponse = {
+        noteId: 'note-456',
+        title: 'Untitled',
+        type: 'text',
+      };
+
+      mockEtapiRequest.mockResolvedValue(mockResponse);
+
+      const result = await createNote(page, 'root');
+
+      expect(result).toBe('note-456');
+      expect(mockEtapiRequest).toHaveBeenCalledWith('/create-note', {
+        method: 'POST',
+        body: expect.objectContaining({
+          title: 'Untitled',
+        }),
+      });
+    });
+
+    it('should add attributes after successful note creation', async () => {
+      const page = createMockPage('page-123', 'Test Page');
+      page.url = 'https://notion.so/test-page-123';
+      const mockResponse = {
+        noteId: 'note-456',
+        title: 'Test Page',
+        type: 'text',
+      };
+
+      mockEtapiRequest.mockResolvedValue(mockResponse);
+
+      const result = await createNote(page, 'root');
+
+      expect(result).toBe('note-456');
+
+      // Should have called etapiRequest for note creation + 3 attributes (notionId, notionUrl, imported)
+      expect(mockEtapiRequest).toHaveBeenCalledTimes(4);
+
+      // Check attribute calls
+      expect(mockEtapiRequest).toHaveBeenCalledWith('/attributes', expect.objectContaining({
+        method: 'POST',
+        body: expect.objectContaining({
+          noteId: 'note-456',
+          name: 'notionId',
+          value: 'page-123',
+        }),
+      }));
+
+      expect(mockEtapiRequest).toHaveBeenCalledWith('/attributes', expect.objectContaining({
+        method: 'POST',
+        body: expect.objectContaining({
+          noteId: 'note-456',
+          name: 'notionUrl',
+          value: 'https://notion.so/test-page-123',
+        }),
+      }));
     });
   });
 });

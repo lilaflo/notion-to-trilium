@@ -140,42 +140,69 @@ async function main() {
       process.exit(1);
     }
 
-    // Validate Trilium parent note
-    logger.info('Validating Trilium parent note...');
+    // Setup Trilium parent note
+    logger.info('Setting up Trilium parent note...');
     let parentNoteId = config.TRILIUM_PARENT_NOTE_ID;
-    let parentNoteValid = await validateParentNote(parentNoteId);
 
-    if (!parentNoteValid) {
-      const rl = createReadlineInterface();
+    // If no parent note specified or default 'root', create a dedicated import folder
+    if (!parentNoteId || parentNoteId === 'root') {
+      logger.info('No specific parent note configured - creating "Notion Import" folder...');
 
-      try {
-        const newParentNoteId = await promptForParentNoteId(rl);
+      // Generate a timestamp for the import folder
+      const timestamp = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+      const folderTitle = `Notion Import (${timestamp})`;
 
-        if (!newParentNoteId) {
-          cache.close();
+      const importFolderId = await createParentNote(folderTitle, 'root');
+
+      if (importFolderId) {
+        parentNoteId = importFolderId;
+        logger.success(`✅ Created import folder: "${folderTitle}" (${importFolderId})`);
+        console.log('');
+        console.log('💡 All Notion pages will be imported under this folder.');
+        console.log('   You can move or rename it later in Trilium.');
+        console.log('');
+      } else {
+        cache.close();
+        logger.error('Failed to create import folder. Exiting.');
+        process.exit(1);
+      }
+    } else {
+      // Validate the specified parent note
+      logger.info(`Validating parent note: ${parentNoteId}...`);
+      let parentNoteValid = await validateParentNote(parentNoteId);
+
+      if (!parentNoteValid) {
+        const rl = createReadlineInterface();
+
+        try {
+          const newParentNoteId = await promptForParentNoteId(rl);
+
+          if (!newParentNoteId) {
+            cache.close();
+            rl.close();
+            process.exit(1);
+          }
+
+          // Validate the new parent note ID
+          logger.info(`Validating new parent note: ${newParentNoteId}...`);
+          parentNoteValid = await validateParentNote(newParentNoteId);
+
+          if (!parentNoteValid) {
+            cache.close();
+            rl.close();
+            console.log('');
+            console.log('❌ The provided parent note ID is still invalid.');
+            console.log('Please check the note ID and try again.');
+            console.log('');
+            process.exit(1);
+          }
+
+          // Update the parent note ID for the import
+          parentNoteId = newParentNoteId;
+          logger.success(`Parent note validated! Will import to: ${parentNoteId}`);
+        } finally {
           rl.close();
-          process.exit(1);
         }
-
-        // Validate the new parent note ID
-        logger.info(`Validating new parent note: ${newParentNoteId}...`);
-        parentNoteValid = await validateParentNote(newParentNoteId);
-
-        if (!parentNoteValid) {
-          cache.close();
-          rl.close();
-          console.log('');
-          console.log('❌ The provided parent note ID is still invalid.');
-          console.log('Please check the note ID and try again.');
-          console.log('');
-          process.exit(1);
-        }
-
-        // Update the parent note ID for the import
-        parentNoteId = newParentNoteId;
-        logger.success(`Parent note validated! Will import to: ${parentNoteId}`);
-      } finally {
-        rl.close();
       }
     }
 

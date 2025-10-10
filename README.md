@@ -82,7 +82,8 @@ NOTION_TOKEN=your_notion_integration_token_here
 TRILIUM_URL=http://localhost:8080
 TRILIUM_TOKEN=your_trilium_etapi_token_here
 
-# Optional: Parent note where imported notes will be created
+# Optional: Parent note ID in Trilium where imported notes will be created
+# If not specified or set to 'root', a "Notion Import (YYYY-MM-DD)" folder will be created automatically
 # TRILIUM_PARENT_NOTE_ID=root
 
 # Import Options
@@ -99,6 +100,8 @@ Import all accessible Notion pages:
 ```bash
 pnpm start
 ```
+
+By default, if you haven't specified a `TRILIUM_PARENT_NOTE_ID` in your `.env` file, the tool will automatically create a **"Notion Import (YYYY-MM-DD)"** folder in your Trilium root to keep all imported notes organized. You can move or rename this folder later in Trilium.
 
 Or using the dev script (with hot reload):
 ```bash

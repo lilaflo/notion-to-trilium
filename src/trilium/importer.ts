@@ -192,10 +192,17 @@ export async function updateNoteContent(
 
       logger.debug(`Fetched ${content?.length || 0} blocks for "${pageMeta.title}"`);
 
+      // Skip notes with no content - leave them as empty placeholders
+      if (!content || content.length === 0) {
+        logger.debug(`Skipping "${pageMeta.title}" - no content blocks`);
+        stats.successful++;
+        continue;
+      }
+
       // Build NotionPage object for conversion
       const page: NotionPage = {
         ...pageMeta,
-        content: content || [], // Ensure content is never null/undefined
+        content: content, // We know content exists at this point
       };
 
       // Convert to HTML with link resolution

@@ -190,14 +190,18 @@ export async function updateNoteContent(
       // Fetch content from Notion
       const content = await fetchContentFn(pageMeta.id);
 
+      logger.debug(`Fetched ${content?.length || 0} blocks for "${pageMeta.title}"`);
+
       // Build NotionPage object for conversion
       const page: NotionPage = {
         ...pageMeta,
-        content,
+        content: content || [], // Ensure content is never null/undefined
       };
 
       // Convert to HTML with link resolution
       const htmlContent = convertPageToHtml(page, pageMapping);
+
+      logger.debug(`Converted "${pageMeta.title}" to HTML (length: ${htmlContent?.length || 0})`);
 
       // Update the note in Trilium
       await updateNoteInTrilium(triliumNoteId, htmlContent, pageMeta);
@@ -224,9 +228,18 @@ async function updateNoteInTrilium(
 ): Promise<void> {
   try {
     // Ensure content is not null or undefined
-    const content = htmlContent || '<p></p>'; // Provide default empty paragraph if content is empty
+    let content = htmlContent;
 
-    logger.debug(`Updating note ${noteId} with content length: ${content.length}`);
+    // Check for null/undefined and provide diagnostic info
+    if (content === null || content === undefined) {
+      logger.warn(`Content is ${content === null ? 'null' : 'undefined'} for "${pageMeta.title}", using empty div`);
+      content = '<div class="notion-page"></div>';
+    } else if (content === '') {
+      logger.debug(`Empty content for "${pageMeta.title}", using empty div`);
+      content = '<div class="notion-page"></div>';
+    }
+
+    logger.debug(`Updating note ${noteId} with content length: ${content.length}, type: ${typeof content}`);
 
     // Update note content - ETAPI expects raw HTML string in body
     const response = await fetch(`${getETAPIBaseUrl()}/etapi/notes/${noteId}/content`, {

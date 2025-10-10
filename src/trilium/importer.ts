@@ -20,6 +20,44 @@ export interface ImportStats {
 type PageMapping = Map<string, string>;
 
 /**
+ * Sorts pages in parent-first order to ensure parents are created before children
+ */
+function sortPagesForImport(pages: NotionPage[]): NotionPage[] {
+  const pageMap = new Map<string, NotionPage>();
+  const sorted: NotionPage[] = [];
+  const visited = new Set<string>();
+
+  // Build a map for quick lookup
+  for (const page of pages) {
+    pageMap.set(page.id, page);
+  }
+
+  // Recursive function to add a page and its ancestors first
+  function addPageWithAncestors(page: NotionPage) {
+    if (visited.has(page.id)) {
+      return;
+    }
+
+    // If page has a parent in our set, add parent first
+    if (page.parentId && pageMap.has(page.parentId)) {
+      const parent = pageMap.get(page.parentId)!;
+      addPageWithAncestors(parent);
+    }
+
+    // Now add this page
+    visited.add(page.id);
+    sorted.push(page);
+  }
+
+  // Process all pages
+  for (const page of pages) {
+    addPageWithAncestors(page);
+  }
+
+  return sorted;
+}
+
+/**
  * Imports Notion pages into Trilium
  */
 export async function importPages(
@@ -50,12 +88,17 @@ export async function importPages(
     }
   }
 
-  // First, create all notes without hierarchy
+  // Sort pages in parent-first order to preserve hierarchy
+  logger.info('Sorting pages to preserve hierarchy...');
+  const sortedPages = sortPagesForImport(pages);
+  logger.debug(`Sorted ${sortedPages.length} pages for import`);
+
+  // Create all notes with proper hierarchy
   logger.info('Creating notes in Trilium...');
 
-  for (let i = 0; i < pages.length; i++) {
-    const page = pages[i];
-    logger.progress(i + 1, pages.length, `Processing: ${page.title}`);
+  for (let i = 0; i < sortedPages.length; i++) {
+    const page = sortedPages[i];
+    logger.progress(i + 1, sortedPages.length, `Processing: ${page.title}`);
 
     try {
       // Check if page needs to be imported using cache

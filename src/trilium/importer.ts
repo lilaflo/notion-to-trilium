@@ -239,6 +239,12 @@ async function updateNoteInTrilium(
       content = '<div class="notion-page"></div>';
     }
 
+    // Final safety check - absolutely ensure we're not sending null
+    if (content === null || content === undefined || content === '') {
+      logger.error(`CRITICAL: Content is still ${content === null ? 'null' : content === undefined ? 'undefined' : 'empty'} for "${pageMeta.title}" after all checks`);
+      content = '<div class="notion-page"><p>This page has no content.</p></div>';
+    }
+
     logger.debug(`Updating note ${noteId} with content length: ${content.length}, type: ${typeof content}`);
 
     // Update note content - ETAPI expects raw HTML string in body
@@ -248,7 +254,7 @@ async function updateNoteInTrilium(
         'Authorization': getETAPIAuthHeader(),
         'Content-Type': 'text/html',
       },
-      body: content, // Send raw HTML, not JSON
+      body: String(content), // Explicitly convert to string to be absolutely sure
     });
 
     if (!response.ok) {

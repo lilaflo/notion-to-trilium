@@ -104,6 +104,7 @@ node dist/index.js --help
 
 Available options:
 - `-r, --root-page-id <id>` - Notion root page ID to start import from (imports only this page and its children)
+- `-t, --trilium-parent-id <id>` - Trilium parent note ID for imported notes (overrides TRILIUM_PARENT_NOTE_ID from .env)
 - `-d, --dry-run` - Preview import without making changes
 - `-s, --structure-only` - Only create note structure (no content)
 - `-l, --log-level <level>` - Set log level (debug, info, warn, error)
@@ -177,7 +178,18 @@ pnpm start -- --root-page-id abc123 --dry-run --log-level debug
 
 # Structure-only for specific page
 pnpm start -- --root-page-id abc123 --structure-only
+
+# Import to a specific Trilium note (e.g., qZVEBMHFNd9r)
+pnpm start -- --trilium-parent-id qZVEBMHFNd9r
+
+# Import specific Notion page to specific Trilium note
+pnpm start -- --root-page-id abc123 --trilium-parent-id qZVEBMHFNd9r
 ```
+
+**Finding a Trilium note ID**:
+- Open Trilium and find the note you want to use as parent
+- Right-click on the note → "Note info"
+- Copy the Note ID (e.g., "qZVEBMHFNd9r")
 
 ### Three-Phase Import Architecture
 

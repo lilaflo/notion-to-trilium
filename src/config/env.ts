@@ -19,6 +19,7 @@ const envSchema = z.object({
  */
 const cliOptionsSchema = z.object({
   rootPageId: z.string().optional(),
+  triliumParentNoteId: z.string().optional(),
   dryRun: z.boolean().optional(),
   structureOnly: z.boolean().optional(),
   logLevel: z.enum(['debug', 'info', 'warn', 'error']).optional(),
@@ -63,7 +64,7 @@ export function getConfig(cliOptions: CLIOptions = {}): Config {
 
       TRILIUM_URL: env.TRILIUM_URL,
       TRILIUM_TOKEN: env.TRILIUM_TOKEN,
-      TRILIUM_PARENT_NOTE_ID: env.TRILIUM_PARENT_NOTE_ID,
+      TRILIUM_PARENT_NOTE_ID: validatedCliOptions.triliumParentNoteId ?? env.TRILIUM_PARENT_NOTE_ID,
 
       DRY_RUN: validatedCliOptions.dryRun ?? false,
       STRUCTURE_ONLY: validatedCliOptions.structureOnly ?? false,

@@ -177,6 +177,7 @@ async function main() {
     .description('Import your Notion pages into Trilium Notes')
     .version('1.0.0')
     .option('-r, --root-page-id <id>', 'Notion root page ID to start import from')
+    .option('-t, --trilium-parent-id <id>', 'Trilium parent note ID for imported notes')
     .option('-d, --dry-run', 'Preview import without making changes', false)
     .option('-s, --structure-only', 'Only create note structure (no content)', false)
     .option('-l, --log-level <level>', 'Set log level (debug, info, warn, error)', 'info')
@@ -187,6 +188,7 @@ async function main() {
   // Build CLI options for config
   const cliOptions: CLIOptions = {
     rootPageId: options.rootPageId,
+    triliumParentNoteId: options.triliumParentId,
     dryRun: options.dryRun,
     structureOnly: options.structureOnly,
     logLevel: options.logLevel as 'debug' | 'info' | 'warn' | 'error',

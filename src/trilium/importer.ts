@@ -249,6 +249,38 @@ export async function validateParentNote(noteId: string): Promise<boolean> {
 }
 
 /**
+ * Creates a new parent note in Trilium for importing Notion pages
+ * @returns the created note ID or null on failure
+ */
+export async function createParentNote(title: string, parentNoteId: string = 'root'): Promise<string | null> {
+  try {
+    logger.debug(`Creating parent note: ${title} under ${parentNoteId}`);
+
+    const response = await etapiRequest<ETAPINote>('/create-note', {
+      method: 'POST',
+      body: {
+        parentNoteId,
+        title,
+        type: 'text',
+        content: '<p>This note was created to import Notion pages.</p>',
+        mime: 'text/html',
+      },
+    });
+
+    if (response.noteId) {
+      logger.success(`Created parent note: "${title}" (${response.noteId})`);
+      return response.noteId;
+    }
+
+    logger.error('Failed to create parent note - no noteId returned');
+    return null;
+  } catch (error) {
+    logger.error(`Failed to create parent note "${title}"`, error);
+    return null;
+  }
+}
+
+/**
  * Searches for existing notes by Notion ID to avoid duplicates
  */
 export async function findExistingNotionNote(notionId: string): Promise<string | null> {

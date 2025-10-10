@@ -256,22 +256,26 @@ This error occurs when you specify a `NOTION_ROOT_PAGE_ID` that either doesn't e
 
 This error occurs when you specify a `TRILIUM_PARENT_NOTE_ID` that either doesn't exist or is not accessible in your Trilium instance.
 
-**Option A: Create a new parent note in Trilium**
-1. Open your Trilium instance
-2. Create a new note where you want to import your Notion pages (e.g., "Imported from Notion")
-3. Right-click on the note → Select "Note info"
-4. Copy the Note ID
-5. Update `TRILIUM_PARENT_NOTE_ID` in your `.env` file with this ID
-6. Run the import again
+**Interactive Recovery**: When validation fails, the tool will present you with interactive options:
 
-**Option B: Change to an existing parent note**
-1. Find an existing note in Trilium where you want to import pages
-2. Right-click on the note → Select "Note info"
-3. Copy the Note ID
-4. Update `TRILIUM_PARENT_NOTE_ID` in your `.env` file with this ID
-5. Alternatively, use `root` to import to the root of your note tree
+1. **Create a new parent note automatically** - The tool can create a new note in Trilium for you
+   - You'll be prompted to enter a title (default: "Imported from Notion")
+   - The note will be created under the root note
+   - The import will proceed with the newly created note
 
-**Note**: The tool validates the parent note before starting the import to provide early feedback. This prevents wasting time on imports that would fail due to an invalid parent note.
+2. **Enter a different parent note ID** - Provide an existing note ID
+   - Find the note in Trilium
+   - Right-click → "Note info" → Copy the Note ID
+   - Paste it when prompted
+
+3. **Use "root" as the parent note** - Import directly to the root of your note tree
+
+4. **Exit and create manually** - Exit the tool and create the note yourself
+   - Create the note in Trilium
+   - Update `TRILIUM_PARENT_NOTE_ID` in your `.env` file
+   - Run the import again
+
+**Note**: The tool validates the parent note before starting the import and provides interactive recovery options. This prevents wasting time on imports that would fail due to an invalid parent note.
 
 ### Import is slow
 

@@ -7,7 +7,7 @@ import { logger } from './utils/logger.js';
 import { createNotionClient } from './notion/client.js';
 import { fetchAllPages, validateRootPage } from './notion/fetcher.js';
 import { initETAPI } from './trilium/etapi.js';
-import { importPages, testConnection, validateParentNote } from './trilium/importer.js';
+import { importPages, testConnection, validateParentNote, createParentNote } from './trilium/importer.js';
 import { NotionCache } from './cache/index.js';
 
 /**
@@ -18,21 +18,37 @@ function createReadlineInterface() {
 }
 
 /**
- * Prompts user for a new parent note ID
+ * Prompts user for a new parent note ID or creates one
  */
 async function promptForParentNoteId(rl: readline.Interface): Promise<string | null> {
   console.log('');
   console.log('❌ The specified Trilium parent note does not exist or is not accessible.');
   console.log('');
   console.log('💡 Would you like to:');
-  console.log('   1. Enter a different parent note ID');
-  console.log('   2. Use "root" as the parent note');
-  console.log('   3. Exit and create a note in Trilium first');
+  console.log('   1. Create a new parent note in Trilium now');
+  console.log('   2. Enter a different parent note ID');
+  console.log('   3. Use "root" as the parent note');
+  console.log('   4. Exit and create a note manually');
   console.log('');
 
-  const choice = await rl.question('Enter your choice (1-3): ');
+  const choice = await rl.question('Enter your choice (1-4): ');
 
   if (choice === '1') {
+    console.log('');
+    const noteTitle = await rl.question('Enter a title for the new parent note (default: "Imported from Notion"): ');
+    const title = noteTitle.trim() || 'Imported from Notion';
+
+    logger.info(`Creating parent note: ${title}...`);
+    const newNoteId = await createParentNote(title);
+
+    if (!newNoteId) {
+      console.log('');
+      console.log('❌ Failed to create the parent note. Please try another option.');
+      return null;
+    }
+
+    return newNoteId;
+  } else if (choice === '2') {
     console.log('');
     console.log('ℹ️  To find a note ID:');
     console.log('   - Open Trilium');
@@ -40,7 +56,7 @@ async function promptForParentNoteId(rl: readline.Interface): Promise<string | n
     console.log('');
     const noteId = await rl.question('Enter the parent note ID: ');
     return noteId.trim() || null;
-  } else if (choice === '2') {
+  } else if (choice === '3') {
     return 'root';
   } else {
     console.log('');

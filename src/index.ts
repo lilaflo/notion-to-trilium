@@ -7,8 +7,9 @@ import { logger } from './utils/logger.js';
 import { createNotionClient } from './notion/client.js';
 import { fetchAllPages, validateRootPage } from './notion/fetcher.js';
 import { initETAPI } from './trilium/etapi.js';
-import { importPages, testConnection, validateParentNote, createParentNote } from './trilium/importer.js';
+import { createNote, testConnection, validateParentNote, createParentNote } from './trilium/importer.js';
 import { NotionCache } from './cache/index.js';
+import type { NotionPage } from './notion/types.js';
 
 /**
  * Creates a readline interface for interactive prompts
@@ -174,40 +175,89 @@ async function main() {
       }
     }
 
-    // Fetch pages from Notion
-    logger.info('Fetching pages from Notion...');
+    // Fetch pages from Notion and import immediately
+    logger.info('Fetching and importing pages...');
     const startTime = Date.now();
 
-    const pages = await fetchAllPages(
+    // Track import statistics
+    const stats = {
+      successful: 0,
+      failed: 0,
+      skipped: 0,
+      total: 0,
+    };
+
+    // Mapping of Notion page IDs to Trilium note IDs for hierarchy
+    const pageMapping = new Map<string, string>();
+
+    // Callback to import each page immediately after fetching
+    const importPageCallback = async (page: NotionPage) => {
+      stats.total++;
+
+      try {
+        // Update cache with fetched page
+        if (cache) {
+          cache.setPage(page.id, page.title, page.lastEditedTime);
+        }
+
+        // Check if page needs to be imported using cache
+        if (cache && !cache.needsImport(page.id, page.lastEditedTime)) {
+          logger.debug(`Skipping unchanged page: ${page.title}`);
+          stats.skipped++;
+
+          // Still add to mapping for hierarchy purposes
+          const cached = cache.getPage(page.id);
+          if (cached?.triliumNoteId) {
+            pageMapping.set(page.id, cached.triliumNoteId);
+          }
+          return;
+        }
+
+        if (config.DRY_RUN) {
+          logger.info(`[DRY RUN] Would import: "${page.title}"`);
+          stats.successful++;
+          return;
+        }
+
+        // Import page to Trilium immediately
+        const noteId = await createNote(page, parentNoteId, pageMapping);
+
+        if (noteId) {
+          pageMapping.set(page.id, noteId);
+          stats.successful++;
+          logger.info(`✅ Imported: ${page.title}`);
+
+          // Mark as imported in cache
+          if (cache) {
+            cache.markImported(page.id, noteId);
+          }
+        } else {
+          stats.failed++;
+          logger.error(`❌ Failed to import: ${page.title}`);
+        }
+      } catch (error) {
+        stats.failed++;
+        logger.error(`❌ Error importing page "${page.title}"`, error);
+      }
+    };
+
+    // Fetch all pages with streaming import
+    await fetchAllPages(
       notionClient,
-      config.NOTION_ROOT_PAGE_ID
+      config.NOTION_ROOT_PAGE_ID,
+      importPageCallback
     );
 
-    const fetchDuration = ((Date.now() - startTime) / 1000).toFixed(2);
-    logger.info(`Fetched ${pages.length} pages in ${fetchDuration}s`);
-
-    if (pages.length === 0) {
-      cache.close();
-      logger.warn('No pages found to import. Make sure your integration has access to pages.');
-      process.exit(0);
-    }
-
-    // Import pages to Trilium
-    logger.info(`Importing ${pages.length} pages to Trilium...`);
-    const importStartTime = Date.now();
-
-    const stats = await importPages(
-      pages,
-      parentNoteId,
-      config.DRY_RUN,
-      cache
-    );
+    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
 
     // Close the cache
     cache.close();
     logger.debug(`Cache saved to: ${cache.getDbPath()}`);
 
-    const importDuration = ((Date.now() - importStartTime) / 1000).toFixed(2);
+    if (stats.total === 0) {
+      logger.warn('No pages found to import. Make sure your integration has access to pages.');
+      process.exit(0);
+    }
 
     // Print final statistics
     console.log('');
@@ -218,7 +268,7 @@ async function main() {
     console.log(`  ✅ Successful:    ${stats.successful}`);
     console.log(`  ❌ Failed:        ${stats.failed}`);
     console.log(`  ⏭️  Skipped:       ${stats.skipped}`);
-    console.log(`  ⏱️  Duration:      ${importDuration}s`);
+    console.log(`  ⏱️  Duration:      ${duration}s`);
     console.log('═══════════════════════════════════════════════════');
     console.log('');
 

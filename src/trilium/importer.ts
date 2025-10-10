@@ -121,12 +121,7 @@ export async function importPages(
         continue;
       }
 
-      // Determine parent - use mapping if this page has a parent in Notion
-      const triliumParentId = page.parentId && pageMapping.has(page.parentId)
-        ? pageMapping.get(page.parentId)!
-        : parentNoteId;
-
-      const noteId = await createNote(page, triliumParentId);
+      const noteId = await createNote(page, parentNoteId, pageMapping);
 
       if (noteId) {
         pageMapping.set(page.id, noteId);
@@ -156,12 +151,22 @@ export async function importPages(
 
 /**
  * Creates a single note in Trilium
+ * @param page - The Notion page to import
+ * @param parentNoteId - The parent note ID in Trilium
+ * @param pageMapping - Optional mapping for resolving parent relationships
+ * @returns The created note ID or null on failure
  */
-async function createNote(
+export async function createNote(
   page: NotionPage,
-  parentNoteId: string
+  parentNoteId: string,
+  pageMapping?: PageMapping
 ): Promise<string | null> {
   try {
+    // Determine parent - use mapping if this page has a parent in Notion
+    const triliumParentId = page.parentId && pageMapping?.has(page.parentId)
+      ? pageMapping.get(page.parentId)!
+      : parentNoteId;
+
     // Convert Notion content to HTML
     const htmlContent = convertPageToHtml(page);
 
@@ -169,7 +174,7 @@ async function createNote(
     const response = await etapiRequest<ETAPINote>('/create-note', {
       method: 'POST',
       body: {
-        parentNoteId,
+        parentNoteId: triliumParentId,
         title: page.title || 'Untitled',
         type: 'text',
         content: htmlContent,

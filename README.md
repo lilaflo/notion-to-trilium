@@ -8,10 +8,11 @@ A TypeScript-based CLI tool to migrate your notes from Notion to Trilium Notes. 
 - 🎯 **Selective Import** - Import specific pages and their children
 - 🏗️ **Structure Preservation** - Maintains parent-child relationships between notes
 - 🎨 **Rich Content Support** - Converts Notion blocks to HTML with formatting, images, code blocks, and more
+- ⚡ **Streaming Import** - Pages are imported to Trilium immediately as they're fetched from Notion
 - 📊 **Progress Tracking** - Real-time progress reporting during import
 - 🔍 **Dry Run Mode** - Preview what will be imported without making changes
 - 🏷️ **Metadata Preservation** - Stores Notion IDs and URLs as Trilium attributes
-- ⚡ **Smart Caching** - SQLite-based cache to speed up subsequent runs by only importing new or modified notes
+- 💾 **Smart Caching** - SQLite-based cache to speed up subsequent runs by only importing new or modified notes
 - 🔄 **Change Detection** - Automatically detects modified notes based on last edited timestamps
 - ✅ **Type-Safe** - Written in TypeScript with full type coverage
 - 🧪 **Well Tested** - Comprehensive unit tests for core functionality
@@ -119,6 +120,15 @@ To import only a specific page and its children:
 4. Run `pnpm start`
 
 The tool will validate that the specified root page exists and is accessible before starting the import. If validation fails, you'll receive clear instructions on how to fix the issue.
+
+### Streaming Import Behavior
+
+The tool uses a **streaming architecture** that imports pages to Trilium immediately as they're fetched from Notion, rather than waiting to fetch all pages first. This provides several benefits:
+
+- **Immediate feedback** - See pages being imported in real-time
+- **Memory efficiency** - Only one page is processed at a time
+- **Resilience** - If the import is interrupted, all successfully imported pages are already stored in Trilium
+- **Better progress tracking** - You can see exactly which page is being processed at any moment
 
 ### Incremental/Subsequent Imports
 

@@ -271,8 +271,10 @@ pnpm start
 
 **Technical details**:
 - The `notionId` attribute is added to notes immediately when they're created in Phase 2
-- Search is performed using Trilium's attribute search: `@notionId="page-id"`
-- Works independently of the cache system for maximum reliability
+- Trilium note IDs are stored in the cache database (`trilium_note_id` column) for fast lookups
+- Cache is checked first before querying Trilium (local SQLite is much faster than API calls)
+- If not found in cache, falls back to searching Trilium using attribute search: `@notionId="page-id"`
+- Cache is automatically updated when notes are created or found
 
 ### Error Logging and Tracking
 

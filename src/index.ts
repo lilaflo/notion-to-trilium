@@ -410,7 +410,8 @@ async function main() {
     const pageMapping = await rebuildHierarchyInTrilium(
       pagesToImport,
       parentNoteId,
-      config.DRY_RUN
+      config.DRY_RUN,
+      cache
     );
 
     if (config.DRY_RUN) {

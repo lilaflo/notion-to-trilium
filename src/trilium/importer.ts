@@ -27,12 +27,14 @@ type PageMapping = Map<string, string>;
  * @param pagesMetadata - Array of page metadata from Phase 1
  * @param rootParentNoteId - The Trilium note ID to use as the root parent
  * @param dryRun - If true, only logs what would be created
+ * @param cache - Optional cache instance for storing/retrieving Trilium note IDs
  * @returns Mapping of Notion page IDs to Trilium note IDs
  */
 export async function rebuildHierarchyInTrilium(
   pagesMetadata: NotionPageMetadata[],
   rootParentNoteId: string = 'root',
-  dryRun: boolean = false
+  dryRun: boolean = false,
+  cache?: NotionCache
 ): Promise<PageMapping> {
   const pageMapping: PageMapping = new Map();
 
@@ -57,8 +59,8 @@ export async function rebuildHierarchyInTrilium(
         ? pageMapping.get(pageMeta.parentId)!
         : rootParentNoteId;
 
-      // Create empty note with just title
-      const noteId = await createEmptyNote(pageMeta.title, triliumParentId, pageMeta.id);
+      // Create empty note with just title (check cache first for existing note)
+      const noteId = await createEmptyNote(pageMeta.title, triliumParentId, pageMeta.id, cache);
 
       if (noteId) {
         pageMapping.set(pageMeta.id, noteId);
@@ -116,20 +118,36 @@ function sortPagesByHierarchy(pages: NotionPageMetadata[]): NotionPageMetadata[]
 
 /**
  * Creates an empty note in Trilium (just title, no content)
- * Checks for existing notes with the same notionId to avoid duplicates
+ * Checks cache and Trilium for existing notes with the same notionId to avoid duplicates
  * This is faster than creating notes with content
  */
 async function createEmptyNote(
   title: string,
   parentNoteId: string,
-  notionPageId: string
+  notionPageId: string,
+  cache?: NotionCache
 ): Promise<string | null> {
   try {
-    // Check if a note with this notionId already exists
+    // First, check the cache for an existing Trilium note ID
+    if (cache) {
+      const cachedPage = cache.getPage(notionPageId);
+      if (cachedPage?.triliumNoteId) {
+        logger.debug(`Found cached Trilium note for "${title}" (${cachedPage.triliumNoteId})`);
+        return cachedPage.triliumNoteId;
+      }
+    }
+
+    // If not in cache, check Trilium directly for a note with this notionId attribute
     const existingNoteId = await findExistingNotionNote(notionPageId);
 
     if (existingNoteId) {
-      logger.debug(`Reusing existing note for "${title}" (${existingNoteId})`);
+      logger.debug(`Found existing note in Trilium for "${title}" (${existingNoteId})`);
+
+      // Store in cache for future lookups
+      if (cache) {
+        cache.markImported(notionPageId, existingNoteId);
+      }
+
       return existingNoteId;
     }
 
@@ -168,6 +186,11 @@ async function createEmptyNote(
       logger.debug(`Added notionId attribute to note ${noteId}`);
     } catch (error) {
       logger.warn(`Failed to add notionId attribute to note ${noteId}`, error);
+    }
+
+    // Store in cache for future lookups
+    if (cache) {
+      cache.markImported(notionPageId, noteId);
     }
 
     return noteId;

@@ -227,17 +227,41 @@ async function main() {
           stats.successful++;
           logger.info(`✅ Imported: ${page.title}`);
 
-          // Mark as imported in cache
+          // Mark as imported in cache and resolve any previous errors
           if (cache) {
             cache.markImported(page.id, noteId);
+            cache.resolveErrors(page.id);
           }
         } else {
           stats.failed++;
           logger.error(`❌ Failed to import: ${page.title}`);
+
+          // Log error to database
+          if (cache) {
+            cache.logError(
+              page.id,
+              page.title,
+              'Failed to create note in Trilium - no noteId returned',
+              'import'
+            );
+          }
         }
       } catch (error) {
         stats.failed++;
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorStack = error instanceof Error ? error.stack : undefined;
         logger.error(`❌ Error importing page "${page.title}"`, error);
+
+        // Log error to database
+        if (cache) {
+          cache.logError(
+            page.id,
+            page.title,
+            errorMessage,
+            'import',
+            errorStack
+          );
+        }
       }
     };
 
@@ -278,7 +302,18 @@ async function main() {
     }
 
     if (stats.failed > 0) {
-      logger.warn('Some pages failed to import. Check the logs above for details.');
+      logger.warn('Some pages failed to import. Check the error summary below for details.');
+
+      // Display error summary if there were failures
+      if (cache) {
+        const errorSummary = cache.getErrorSummary(20);
+        console.log(errorSummary);
+        console.log('💡 Error details are stored in the cache database.');
+        console.log(`   Database: ${cache.getDbPath()}`);
+        console.log('   Query the import_errors table for detailed analysis.');
+        console.log('');
+      }
+
       process.exit(1);
     }
 

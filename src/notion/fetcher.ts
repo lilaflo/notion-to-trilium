@@ -456,7 +456,8 @@ async function fetchBlocks(
           };
 
           // Recursively fetch children if they exist
-          if (block.has_children) {
+          // BUT: Skip child_page blocks - they are separate pages that will be imported independently
+          if (block.has_children && block.type !== 'child_page') {
             notionBlock.children = await fetchBlocks(client, block.id, depth + 1, maxDepth);
           }
 

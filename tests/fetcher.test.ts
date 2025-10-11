@@ -1,5 +1,5 @@
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
-import { validateRootPage, fetchAllPages } from '../src/notion/fetcher.js';
+import { validateRootPage, fetchAllPages, fetchPageContent } from '../src/notion/fetcher.js';
 import type { Client } from '@notionhq/client';
 import type { NotionPage } from '../src/notion/types.js';
 
@@ -317,6 +317,241 @@ describe('Notion Fetcher', () => {
       expect(pages[0]).toMatchObject({
         id: 'page-id',
         title: 'Test Page',
+      });
+    });
+  });
+
+  describe('fetchPageContent - child_page block handling', () => {
+    let mockClient: Client;
+    let mockListChildren: any;
+
+    beforeEach(() => {
+      mockListChildren = jest.fn();
+      mockClient = {
+        blocks: {
+          children: {
+            list: mockListChildren,
+          },
+        },
+      } as any;
+    });
+
+    it('should NOT recursively fetch content for child_page blocks', async () => {
+      // Mock response with a child_page block that has children
+      mockListChildren.mockResolvedValueOnce({
+        results: [
+          {
+            id: 'heading-block-id',
+            type: 'heading_2',
+            heading_2: {
+              rich_text: [{ plain_text: 'Test Heading' }],
+            },
+            has_children: false,
+          },
+          {
+            id: 'child-page-block-id',
+            type: 'child_page',
+            child_page: {
+              title: 'Child Page',
+            },
+            has_children: true, // Child pages can have children
+          },
+          {
+            id: 'paragraph-block-id',
+            type: 'paragraph',
+            paragraph: {
+              rich_text: [{ plain_text: 'Test paragraph' }],
+            },
+            has_children: false,
+          },
+        ],
+        has_more: false,
+      });
+
+      const content = await fetchPageContent(mockClient, 'test-page-id');
+
+      // Verify we got 3 blocks
+      expect(content).toHaveLength(3);
+
+      // Verify child_page block exists but has NO children
+      const childPageBlock = content.find(b => b.type === 'child_page');
+      expect(childPageBlock).toBeDefined();
+      expect(childPageBlock?.hasChildren).toBe(true); // Original hasChildren flag is preserved
+      expect(childPageBlock?.children).toBeUndefined(); // But children were NOT fetched
+
+      // Verify blocks.children.list was called only ONCE (not recursively for child_page)
+      expect(mockListChildren).toHaveBeenCalledTimes(1);
+      expect(mockListChildren).toHaveBeenCalledWith({
+        block_id: 'test-page-id',
+        start_cursor: undefined,
+        page_size: 100,
+      });
+    });
+
+    it('should recursively fetch content for non-child_page blocks with children', async () => {
+      // Mock responses for a toggle block with nested content
+      mockListChildren
+        .mockResolvedValueOnce({
+          results: [
+            {
+              id: 'toggle-block-id',
+              type: 'toggle',
+              toggle: {
+                rich_text: [{ plain_text: 'Toggle heading' }],
+              },
+              has_children: true,
+            },
+          ],
+          has_more: false,
+        })
+        .mockResolvedValueOnce({
+          // Nested content inside toggle
+          results: [
+            {
+              id: 'nested-paragraph-id',
+              type: 'paragraph',
+              paragraph: {
+                rich_text: [{ plain_text: 'Nested content' }],
+              },
+              has_children: false,
+            },
+          ],
+          has_more: false,
+        });
+
+      const content = await fetchPageContent(mockClient, 'test-page-id');
+
+      // Verify we got the toggle block with its children
+      expect(content).toHaveLength(1);
+      expect(content[0].type).toBe('toggle');
+      expect(content[0].children).toBeDefined();
+      expect(content[0].children).toHaveLength(1);
+      expect(content[0].children![0].type).toBe('paragraph');
+
+      // Verify blocks.children.list was called TWICE (once for page, once for toggle)
+      expect(mockListChildren).toHaveBeenCalledTimes(2);
+      expect(mockListChildren).toHaveBeenNthCalledWith(1, {
+        block_id: 'test-page-id',
+        start_cursor: undefined,
+        page_size: 100,
+      });
+      expect(mockListChildren).toHaveBeenNthCalledWith(2, {
+        block_id: 'toggle-block-id',
+        start_cursor: undefined,
+        page_size: 100,
+      });
+    });
+
+    it('should handle mixed content with child_page and nested blocks correctly', async () => {
+      // Mock a page with both child_page blocks and blocks with nested content
+      mockListChildren
+        .mockResolvedValueOnce({
+          results: [
+            {
+              id: 'child-page-1',
+              type: 'child_page',
+              child_page: { title: 'Child Page 1' },
+              has_children: true,
+            },
+            {
+              id: 'toggle-block',
+              type: 'toggle',
+              toggle: {
+                rich_text: [{ plain_text: 'Toggle' }],
+              },
+              has_children: true,
+            },
+            {
+              id: 'child-page-2',
+              type: 'child_page',
+              child_page: { title: 'Child Page 2' },
+              has_children: true,
+            },
+          ],
+          has_more: false,
+        })
+        .mockResolvedValueOnce({
+          // Nested content for toggle only
+          results: [
+            {
+              id: 'nested-para',
+              type: 'paragraph',
+              paragraph: {
+                rich_text: [{ plain_text: 'In toggle' }],
+              },
+              has_children: false,
+            },
+          ],
+          has_more: false,
+        });
+
+      const content = await fetchPageContent(mockClient, 'test-page-id');
+
+      expect(content).toHaveLength(3);
+
+      // Child pages should have NO children
+      const childPage1 = content.find(b => b.id === 'child-page-1');
+      const childPage2 = content.find(b => b.id === 'child-page-2');
+      expect(childPage1?.children).toBeUndefined();
+      expect(childPage2?.children).toBeUndefined();
+
+      // Toggle should have children
+      const toggle = content.find(b => b.id === 'toggle-block');
+      expect(toggle?.children).toHaveLength(1);
+      expect(toggle?.children![0].type).toBe('paragraph');
+
+      // Should have called list twice: once for page, once for toggle (NOT for child_pages)
+      expect(mockListChildren).toHaveBeenCalledTimes(2);
+    });
+
+    it('should handle pagination correctly when fetching blocks', async () => {
+      // Mock paginated response
+      mockListChildren
+        .mockResolvedValueOnce({
+          results: [
+            {
+              id: 'block-1',
+              type: 'paragraph',
+              paragraph: {
+                rich_text: [{ plain_text: 'First page' }],
+              },
+              has_children: false,
+            },
+          ],
+          has_more: true,
+          next_cursor: 'cursor-123',
+        })
+        .mockResolvedValueOnce({
+          results: [
+            {
+              id: 'block-2',
+              type: 'paragraph',
+              paragraph: {
+                rich_text: [{ plain_text: 'Second page' }],
+              },
+              has_children: false,
+            },
+          ],
+          has_more: false,
+        });
+
+      const content = await fetchPageContent(mockClient, 'test-page-id');
+
+      expect(content).toHaveLength(2);
+      expect(mockListChildren).toHaveBeenCalledTimes(2);
+
+      // First call without cursor
+      expect(mockListChildren).toHaveBeenNthCalledWith(1, {
+        block_id: 'test-page-id',
+        start_cursor: undefined,
+        page_size: 100,
+      });
+
+      // Second call with cursor
+      expect(mockListChildren).toHaveBeenNthCalledWith(2, {
+        block_id: 'test-page-id',
+        start_cursor: 'cursor-123',
+        page_size: 100,
       });
     });
   });
